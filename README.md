@@ -33,9 +33,8 @@ matrix-vector-nexus/
 ├── modules/
 │   └── matrix-vector-nexus/     # reusable module
 ├── examples/
-│   └── basic/                   # runnable example
-└── docs/
-    └── architecture.png
+└── basic/                   # runnable example
+
 ```
 
 ---
