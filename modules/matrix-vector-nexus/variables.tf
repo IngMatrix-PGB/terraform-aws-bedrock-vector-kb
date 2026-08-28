@@ -1,9 +1,11 @@
+# tflint-ignore: terraform_unused_declarations # reserved/no-op input kept intentionally (see PR #1); removal would break existing callers.
 variable "kb_prefix" {
   description = "Reserved for future use. Not currently applied to any resource name or tag by this module. Accepted for forward/backward compatibility; safe to omit."
   type        = string
   default     = "matrix"
 }
 
+# tflint-ignore: terraform_unused_declarations # reserved/no-op input kept intentionally (see PR #1); removal would break existing callers.
 variable "account_id" {
   description = "Reserved for future use. Not currently referenced by any resource, local, or output in this module. Accepted for forward/backward compatibility; safe to omit."
   type        = string

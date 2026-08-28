@@ -1,0 +1,92 @@
+name: Terraform CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+# Static-analysis only. No AWS credentials are configured or required anywhere
+# in this workflow: no plan/apply, only fmt/init/validate/tflint/checkov.
+
+env:
+  # Pinned to the Terraform CLI version verified locally against this repo.
+  # The module only declares a floor (required_version >= 1.5.0); bump this
+  # deliberately when adopting a newer CLI, in step with PR #1's provider pins.
+  TERRAFORM_VERSION: "1.15.5"
+
+jobs:
+  fmt:
+    name: terraform fmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: hashicorp/setup-terraform@v4.0.1
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+      - run: terraform fmt -check -recursive -diff .
+
+  validate:
+    name: terraform validate (${{ matrix.root }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        root:
+          - modules/matrix-vector-nexus
+          - examples/basic
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: hashicorp/setup-terraform@v4.0.1
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+      - name: terraform init (no backend, no credentials)
+        working-directory: ${{ matrix.root }}
+        run: terraform init -backend=false -input=false
+      - name: terraform validate
+        working-directory: ${{ matrix.root }}
+        run: terraform validate
+
+  tflint:
+    name: tflint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: terraform-linters/setup-tflint@v6.3.0
+        with:
+          tflint_version: v0.64.0
+      - name: tflint --init (installs the aws ruleset plugin, no AWS credentials involved)
+        run: tflint --init
+      - name: tflint --recursive (covers modules/matrix-vector-nexus and examples/basic)
+        run: tflint --recursive
+
+  checkov:
+    name: checkov
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: checkov
+        uses: bridgecrewio/checkov-action@v12.1347.0
+        with:
+          directory: .
+          framework: terraform
+          quiet: true
+          output_format: cli
+          # --- Soft-fail scope: known, already-documented technical debt only ---
+          # These 5 findings were confirmed during the initial repo discovery,
+          # all on aws_s3_bucket.kb_docs, and are explicitly deferred to a future
+          # S3 security-hardening PR (KMS, access logging, lifecycle, replication,
+          # event notifications). They are NOT skipped/hidden: they still print
+          # in this job's output and remain visible to anyone reading the log.
+          # Any other finding (present or introduced later) still hard-fails CI.
+          #   CKV_AWS_145  - S3 bucket not encrypted with KMS (uses SSE-S3/AES256 today)
+          #   CKV_AWS_18   - S3 bucket access logging not enabled
+          #   CKV2_AWS_61  - S3 bucket has no lifecycle configuration
+          #   CKV_AWS_144  - S3 bucket cross-region replication not enabled
+          #   CKV2_AWS_62  - S3 bucket event notifications not enabled
+          soft_fail_on: "CKV_AWS_145,CKV_AWS_18,CKV2_AWS_61,CKV_AWS_144,CKV2_AWS_62"
