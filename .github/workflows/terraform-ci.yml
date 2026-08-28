@@ -52,6 +52,22 @@ jobs:
         working-directory: ${{ matrix.root }}
         run: terraform validate
 
+  test:
+    name: terraform test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: hashicorp/setup-terraform@v4.0.1
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+      - name: terraform init (no backend, no credentials)
+        working-directory: modules/matrix-vector-nexus
+        run: terraform init -backend=false -input=false
+      - name: terraform test (mock_provider only - no AWS credentials, no real resources)
+        working-directory: modules/matrix-vector-nexus
+        run: terraform test
+
   tflint:
     name: tflint
     runs-on: ubuntu-latest
