@@ -113,24 +113,7 @@ run "iam_policies_still_resolve_against_the_existing_index" {
   }
 }
 
-# NOTE - a "missing_index_arn_and_create_disabled" run (create_s3vectors =
-# false with s3vectors_index_arn omitted) was attempted here and is
-# deliberately NOT included.
-#
-# It does not produce a graceful "skip this KB" plan as expected. Instead
-# `terraform plan` crashes with:
-#   Error: Invalid function argument
-#   on main.tf line 12, in locals:
-#     12: if try(v.create_s3vectors, false) == false && trimspace(try(v.s3vectors_index_arn, "")) != ""
-#     v.s3vectors_index_arn is null
-#   Invalid value for "str" parameter: argument must not be null.
-#
-# Root cause: `try(v.s3vectors_index_arn, "")` only catches expressions
-# that error; reading an optional(string) attribute that was simply
-# omitted does not error, it evaluates to `null`, so the try() fallback
-# never applies and the null reaches `trimspace()` unguarded. This is a
-# genuine bug in the module's locals block (modules/matrix-vector-nexus/
-# main.tf line 12), discovered by this test suite and NOT fixed here per
-# PR #3 scope (test-only, no production changes) - see PR #3's "Bugs
-# Discovered" section for the reported finding and suggested fix
-# (e.g. `try(v.s3vectors_index_arn, null) != null && ...` or a `coalesce`).
+# NOTE - the "create_s3vectors = false with s3vectors_index_arn
+# omitted/blank" case discovered as a crash in PR #3 is now covered in
+# tests/invalid-vector-index-input.tftest.hcl (PR #4), which asserts the
+# module rejects it with a clear validation error instead of crashing.

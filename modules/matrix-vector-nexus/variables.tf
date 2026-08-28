@@ -42,6 +42,16 @@ variable "kbs" {
     # Reserved: accepted but not yet wired to any resource in this module (no-op today).
     enable_bedrock_data_automation = optional(bool, false)
   }))
+
+  validation {
+    condition = alltrue([
+      for k, v in var.kbs : (
+        try(v.create_s3vectors, false) == true ||
+        (v.s3vectors_index_arn != null && trimspace(v.s3vectors_index_arn) != "")
+      )
+    ])
+    error_message = "Each kbs entry with create_s3vectors = false must supply a non-empty s3vectors_index_arn (it was null, omitted, or blank for at least one entry)."
+  }
 }
 
 variable "tags" {
