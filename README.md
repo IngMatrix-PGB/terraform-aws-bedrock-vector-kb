@@ -29,12 +29,15 @@ This module is designed for **reproducible, GitOps-friendly** deployments.
 ## 📦 Repo Structure
 
 ```text
-matrix-vector-nexus/
-├── modules/
-│   └── matrix-vector-nexus/     # reusable module
+terraform-aws-bedrock-vector-kb/
+├── main.tf                  # reusable module (repo root)
+├── variables.tf
+├── outputs.tf
+├── versions.tf
+├── tests/                   # native terraform test suite
 ├── examples/
-└── basic/                   # runnable example
-
+│   └── basic/               # runnable example
+└── .github/workflows/       # CI: fmt, validate, tflint, checkov, test
 ```
 
 ---

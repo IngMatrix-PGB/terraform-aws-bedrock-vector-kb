@@ -22,7 +22,7 @@ provider "awscc" {
 }
 
 module "matrix_vector_nexus" {
-  source = "../../modules/matrix-vector-nexus"
+  source = "../.."
 
   kb_prefix  = "matrix"
   enable_kbs = true

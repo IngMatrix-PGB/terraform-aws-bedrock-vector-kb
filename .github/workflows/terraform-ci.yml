@@ -37,7 +37,7 @@ jobs:
       fail-fast: false
       matrix:
         root:
-          - modules/matrix-vector-nexus
+          - .
           - examples/basic
     steps:
       - uses: actions/checkout@v7.0.1
@@ -62,10 +62,8 @@ jobs:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
           terraform_wrapper: false
       - name: terraform init (no backend, no credentials)
-        working-directory: modules/matrix-vector-nexus
         run: terraform init -backend=false -input=false
       - name: terraform test (mock_provider only - no AWS credentials, no real resources)
-        working-directory: modules/matrix-vector-nexus
         run: terraform test
 
   tflint:
@@ -78,7 +76,7 @@ jobs:
           tflint_version: v0.64.0
       - name: tflint --init (installs the aws ruleset plugin, no AWS credentials involved)
         run: tflint --init
-      - name: tflint --recursive (covers modules/matrix-vector-nexus and examples/basic)
+      - name: tflint --recursive (covers the root module and examples/basic)
         run: tflint --recursive
 
   checkov:
