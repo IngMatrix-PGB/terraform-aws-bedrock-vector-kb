@@ -1,11 +1,11 @@
 variable "kb_prefix" {
-  description = "Short prefix used for naming/tagging."
+  description = "Reserved for future use. Not currently applied to any resource name or tag by this module. Accepted for forward/backward compatibility; safe to omit."
   type        = string
   default     = "matrix"
 }
 
 variable "account_id" {
-  description = "AWS account id (used only for tagging/metadata in some orgs)."
+  description = "Reserved for future use. Not currently referenced by any resource, local, or output in this module. Accepted for forward/backward compatibility; safe to omit."
   type        = string
   default     = ""
 }
@@ -33,11 +33,11 @@ variable "kbs" {
     s3vectors_bucket_name     = optional(string)
     s3vectors_index_name      = optional(string)
     s3vectors_dimension       = optional(number, 1024)
-    s3vectors_distance_metric = optional(string, "cosine") # cosine|euclidean
+    s3vectors_distance_metric = optional(string, "cosine")  # cosine|euclidean
     s3vectors_data_type       = optional(string, "float32") # currently float32
-    s3vectors_index_arn       = optional(string) # used when create_s3vectors=false
+    s3vectors_index_arn       = optional(string)            # used when create_s3vectors=false
 
-    # Optional
+    # Reserved: accepted but not yet wired to any resource in this module (no-op today).
     enable_bedrock_data_automation = optional(bool, false)
   }))
 }
