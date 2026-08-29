@@ -28,6 +28,7 @@ jobs:
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
           terraform_wrapper: false
+      - run: terraform version
       - run: terraform fmt -check -recursive -diff .
 
   validate:
@@ -45,6 +46,7 @@ jobs:
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
           terraform_wrapper: false
+      - run: terraform version
       - name: terraform init (no backend, no credentials)
         working-directory: ${{ matrix.root }}
         run: terraform init -backend=false -input=false
@@ -61,6 +63,7 @@ jobs:
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
           terraform_wrapper: false
+      - run: terraform version
       - name: terraform init (no backend, no credentials)
         run: terraform init -backend=false -input=false
       - name: terraform test (mock_provider only - no AWS credentials, no real resources)
@@ -74,6 +77,7 @@ jobs:
       - uses: terraform-linters/setup-tflint@v6.3.0
         with:
           tflint_version: v0.64.0
+      - run: tflint --version
       - name: tflint --init (installs the aws ruleset plugin, no AWS credentials involved)
         run: tflint --init
       - name: tflint --recursive (covers the root module and examples/basic)
@@ -84,55 +88,79 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
-      - name: checkov
-        uses: bridgecrewio/checkov-action@v12.1347.0
+      - uses: actions/setup-python@v7.0.0
         with:
-          directory: .
-          framework: terraform
-          quiet: true
-          output_format: cli
-          # --- Soft-fail scope: intentionally-not-applicable findings only ---
-          # PR #6 resolved KMS encryption support (opt-in), a TLS-only bucket
-          # policy, a lifecycle configuration, and opt-in access logging for
-          # aws_s3_bucket.kb_docs - CKV_AWS_145, CKV_AWS_18, and CKV2_AWS_61
-          # now pass and were removed from this list. The 2 remaining IDs are
-          # classified NOT APPLICABLE to this module's contract (see PR #6
-          # report), not deferred debt - they are NOT skipped/hidden: they
-          # still print in this job's output and remain visible in the log.
-          # Any other finding (present or introduced later) still hard-fails CI.
-          #   CKV_AWS_144  - cross-region replication: no DR/multi-region
-          #                  contract exists in this module; would require
-          #                  inventing a destination bucket/region/IAM role
-          #                  with no consumer-driven need.
-          #   CKV2_AWS_62  - event notifications: Bedrock ingestion is
-          #                  triggered via StartIngestionJob (API/console),
-          #                  not S3 events; there is no consumer for
-          #                  notifications this bucket could emit.
-          #   CKV_AWS_300  - false positive, not real debt: this check wants
-          #                  an abort_incomplete_multipart_upload rule,
-          #                  which IS present and set to 7 days (verified by
-          #                  tests/docs-bucket-hardening.tftest.hcl). Checkov
-          #                  fails to recognize it once a sibling
-          #                  `dynamic "rule"` block (the opt-in
-          #                  noncurrent-version-expiration rule) exists in
-          #                  the same resource. Restructuring the HCL just to
-          #                  satisfy this scanner limitation was deliberately
-          #                  not done - see PR #6 report.
-          soft_fail_on: "CKV_AWS_144,CKV2_AWS_62,CKV_AWS_300"
+          python-version: "3.12"
+      # Install the actual checkov CLI explicitly instead of relying on a
+      # wrapper Action - bridgecrewio/checkov-action@v12.1347.0 was found to
+      # resolve to a much older bundled engine (bridgecrew/checkov:2.0.930)
+      # than the one validated locally, producing different Terraform
+      # resource-correlation behavior and different failing check IDs
+      # (CKV_AWS_19/CKV_AWS_21) that never appeared locally. Pinning the
+      # engine version directly removes that indirection.
+      - name: install checkov 3.3.13 (explicit engine, matches local validation)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "checkov==3.3.13"
+          checkov --version
+      # --- Soft-fail scope: intentionally-not-applicable findings only ---
+      # PR #6 resolved KMS encryption support (opt-in), a TLS-only bucket
+      # policy, a lifecycle configuration, and opt-in access logging for
+      # aws_s3_bucket.kb_docs - CKV_AWS_145, CKV_AWS_18, and CKV2_AWS_61
+      # now pass and were removed from this list. The 2 remaining IDs are
+      # classified NOT APPLICABLE to this module's contract (see PR #6
+      # report), not deferred debt - they are NOT skipped/hidden: they
+      # still print in this job's output and remain visible in the log.
+      # Any other finding (present or introduced later) still hard-fails CI.
+      #   CKV_AWS_144  - cross-region replication: no DR/multi-region
+      #                  contract exists in this module; would require
+      #                  inventing a destination bucket/region/IAM role
+      #                  with no consumer-driven need.
+      #   CKV2_AWS_62  - event notifications: Bedrock ingestion is
+      #                  triggered via StartIngestionJob (API/console),
+      #                  not S3 events; there is no consumer for
+      #                  notifications this bucket could emit.
+      #   CKV_AWS_300  - false positive, not real debt: this check wants
+      #                  an abort_incomplete_multipart_upload rule,
+      #                  which IS present and set to 7 days (verified by
+      #                  tests/docs-bucket-hardening.tftest.hcl). Checkov
+      #                  fails to recognize it once a sibling
+      #                  `dynamic "rule"` block (the opt-in
+      #                  noncurrent-version-expiration rule) exists in
+      #                  the same resource. Restructuring the HCL just to
+      #                  satisfy this scanner limitation was deliberately
+      #                  not done - see PR #6 report.
+      - name: checkov
+        run: |
+          checkov -d . --framework terraform --compact --quiet \
+            --soft-fail-on CKV_AWS_144,CKV2_AWS_62,CKV_AWS_300
 
   docs:
     name: terraform-docs drift check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
-      # Read-only: fails if README.md's generated tables are stale relative
-      # to variables.tf/outputs.tf/main.tf. Does not modify or commit
-      # anything (git-push is left at its default of false) - regenerating
-      # the docs locally (see CONTRIBUTING.md) and committing the result is
-      # still on the contributor.
-      - name: terraform-docs (fails on drift, no auto-commit)
-        uses: terraform-docs/gh-actions@v1.4.1
-        with:
-          config-file: .terraform-docs.yml
-          git-push: "false"
-          fail-on-diff: "true"
+      # Install the actual terraform-docs binary explicitly instead of
+      # relying on a wrapper Action - terraform-docs/gh-actions@v1.4.1 was
+      # found to produce output that differs from the v0.24.0 binary
+      # validated locally (likely a different bundled terraform-docs core
+      # version), causing a false drift failure even though the committed
+      # README was actually up to date.
+      - name: install terraform-docs v0.24.0 (explicit binary, matches local validation)
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/terraform-docs.tar.gz" \
+            https://github.com/terraform-docs/terraform-docs/releases/download/v0.24.0/terraform-docs-v0.24.0-linux-amd64.tar.gz
+          mkdir -p "$RUNNER_TEMP/terraform-docs-bin"
+          tar -xzf "$RUNNER_TEMP/terraform-docs.tar.gz" -C "$RUNNER_TEMP/terraform-docs-bin" terraform-docs
+          chmod +x "$RUNNER_TEMP/terraform-docs-bin/terraform-docs"
+          echo "$RUNNER_TEMP/terraform-docs-bin" >> "$GITHUB_PATH"
+      - name: terraform-docs --version
+        run: terraform-docs --version
+      # Read-only: regenerates the doc block in-place, then fails if that
+      # changed README.md relative to what's committed. Does not commit or
+      # push anything - regenerating locally (see CONTRIBUTING.md) and
+      # committing the result is still on the contributor.
+      - name: terraform-docs drift check (fails on drift, no auto-commit)
+        run: |
+          terraform-docs -c .terraform-docs.yml .
+          git diff --exit-code -- README.md
