@@ -91,16 +91,31 @@ jobs:
           framework: terraform
           quiet: true
           output_format: cli
-          # --- Soft-fail scope: known, already-documented technical debt only ---
-          # These 5 findings were confirmed during the initial repo discovery,
-          # all on aws_s3_bucket.kb_docs, and are explicitly deferred to a future
-          # S3 security-hardening PR (KMS, access logging, lifecycle, replication,
-          # event notifications). They are NOT skipped/hidden: they still print
-          # in this job's output and remain visible to anyone reading the log.
+          # --- Soft-fail scope: intentionally-not-applicable findings only ---
+          # PR #6 resolved KMS encryption support (opt-in), a TLS-only bucket
+          # policy, a lifecycle configuration, and opt-in access logging for
+          # aws_s3_bucket.kb_docs - CKV_AWS_145, CKV_AWS_18, and CKV2_AWS_61
+          # now pass and were removed from this list. The 2 remaining IDs are
+          # classified NOT APPLICABLE to this module's contract (see PR #6
+          # report), not deferred debt - they are NOT skipped/hidden: they
+          # still print in this job's output and remain visible in the log.
           # Any other finding (present or introduced later) still hard-fails CI.
-          #   CKV_AWS_145  - S3 bucket not encrypted with KMS (uses SSE-S3/AES256 today)
-          #   CKV_AWS_18   - S3 bucket access logging not enabled
-          #   CKV2_AWS_61  - S3 bucket has no lifecycle configuration
-          #   CKV_AWS_144  - S3 bucket cross-region replication not enabled
-          #   CKV2_AWS_62  - S3 bucket event notifications not enabled
-          soft_fail_on: "CKV_AWS_145,CKV_AWS_18,CKV2_AWS_61,CKV_AWS_144,CKV2_AWS_62"
+          #   CKV_AWS_144  - cross-region replication: no DR/multi-region
+          #                  contract exists in this module; would require
+          #                  inventing a destination bucket/region/IAM role
+          #                  with no consumer-driven need.
+          #   CKV2_AWS_62  - event notifications: Bedrock ingestion is
+          #                  triggered via StartIngestionJob (API/console),
+          #                  not S3 events; there is no consumer for
+          #                  notifications this bucket could emit.
+          #   CKV_AWS_300  - false positive, not real debt: this check wants
+          #                  an abort_incomplete_multipart_upload rule,
+          #                  which IS present and set to 7 days (verified by
+          #                  tests/docs-bucket-hardening.tftest.hcl). Checkov
+          #                  fails to recognize it once a sibling
+          #                  `dynamic "rule"` block (the opt-in
+          #                  noncurrent-version-expiration rule) exists in
+          #                  the same resource. Restructuring the HCL just to
+          #                  satisfy this scanner limitation was deliberately
+          #                  not done - see PR #6 report.
+          soft_fail_on: "CKV_AWS_144,CKV2_AWS_62,CKV_AWS_300"

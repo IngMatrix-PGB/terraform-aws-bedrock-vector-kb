@@ -56,6 +56,17 @@ locals {
     for k, v in local.requested_kbs : k => v
     if contains(keys(local.index_arn_by_kb), k)
   }
+
+  # Docs bucket security opt-ins: only present when the caller supplied them.
+  kbs_with_kms = {
+    for k, v in local.enabled_kbs : k => v
+    if try(v.kms_key_arn, null) != null
+  }
+
+  kbs_with_logging = {
+    for k, v in local.enabled_kbs : k => v
+    if try(v.logging_target_bucket, null) != null
+  }
 }
 
 # -----------------------------
@@ -94,8 +105,96 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "kb_docs" {
   bucket   = aws_s3_bucket.kb_docs[each.key].id
 
   rule {
-    apply_server_side_encryption_by_default { sse_algorithm = "AES256" }
+    apply_server_side_encryption_by_default {
+      sse_algorithm     = try(each.value.kms_key_arn, null) != null ? "aws:kms" : "AES256"
+      kms_master_key_id = try(each.value.kms_key_arn, null)
+    }
+    bucket_key_enabled = try(each.value.kms_key_arn, null) != null
   }
+}
+
+# -----------------------------
+# Docs bucket hardening: deny non-TLS access (always enforced, no opt-out)
+# -----------------------------
+data "aws_iam_policy_document" "kb_docs_tls_only" {
+  for_each = local.enabled_kbs
+
+  statement {
+    sid    = "DenyInsecureTransport"
+    effect = "Deny"
+
+    principals {
+      type        = "AWS"
+      identifiers = ["*"]
+    }
+
+    actions = ["s3:*"]
+    resources = [
+      aws_s3_bucket.kb_docs[each.key].arn,
+      "${aws_s3_bucket.kb_docs[each.key].arn}/*"
+    ]
+
+    condition {
+      test     = "Bool"
+      variable = "aws:SecureTransport"
+      values   = ["false"]
+    }
+  }
+}
+
+resource "aws_s3_bucket_policy" "kb_docs_tls_only" {
+  for_each = local.enabled_kbs
+
+  bucket = aws_s3_bucket.kb_docs[each.key].id
+  policy = data.aws_iam_policy_document.kb_docs_tls_only[each.key].json
+}
+
+# -----------------------------
+# Docs bucket hardening: lifecycle
+#
+# The multipart-upload cleanup rule is universal hygiene with no impact on
+# any valid object. Noncurrent-version expiration is genuinely destructive
+# retention behavior (it permanently deletes old version content), so it
+# is only present when the caller opts in via
+# noncurrent_version_expiration_days - never a default.
+# -----------------------------
+resource "aws_s3_bucket_lifecycle_configuration" "kb_docs" {
+  for_each = local.enabled_kbs
+
+  bucket = aws_s3_bucket.kb_docs[each.key].id
+
+  rule {
+    id     = "abort-incomplete-multipart-uploads"
+    status = "Enabled"
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
+
+  dynamic "rule" {
+    for_each = try(each.value.noncurrent_version_expiration_days, null) != null ? [each.value.noncurrent_version_expiration_days] : []
+
+    content {
+      id     = "expire-noncurrent-versions"
+      status = "Enabled"
+
+      noncurrent_version_expiration {
+        noncurrent_days = rule.value
+      }
+    }
+  }
+}
+
+# -----------------------------
+# Docs bucket hardening: optional access logging (bring your own log bucket)
+# -----------------------------
+resource "aws_s3_bucket_logging" "kb_docs" {
+  for_each = local.kbs_with_logging
+
+  bucket        = aws_s3_bucket.kb_docs[each.key].id
+  target_bucket = each.value.logging_target_bucket
+  target_prefix = each.value.logging_target_prefix
 }
 
 # -----------------------------
@@ -205,6 +304,41 @@ resource "aws_iam_role_policy_attachment" "s3vectors" {
   role       = aws_iam_role.bedrock_kb[each.key].name
   policy_arn = aws_iam_policy.s3vectors[each.key].arn
 }
+
+# Only created when the caller opts into SSE-KMS via kms_key_arn - the
+# Bedrock role needs this to read/write KMS-encrypted docs objects.
+resource "aws_iam_policy" "kb_s3_kms" {
+  for_each = local.kbs_with_kms
+  name     = "${each.value.role_name}-s3-kms"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid    = "S3DocsKmsAccess"
+      Effect = "Allow"
+      Action = [
+        "kms:Decrypt",
+        "kms:GenerateDataKey"
+      ]
+      Resource = each.value.kms_key_arn
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "s3_kms" {
+  for_each   = local.kbs_with_kms
+  role       = aws_iam_role.bedrock_kb[each.key].name
+  policy_arn = aws_iam_policy.kb_s3_kms[each.key].arn
+}
+
+# Deliberately NOT added to awscc_bedrock_knowledge_base/data_source's
+# depends_on below: local.kbs_with_kms only has instances for KBs that
+# opted into kms_key_arn, so adding this resource address to a shared
+# depends_on list would force every KB (including ones with no KMS key at
+# all) to wait on it collectively - an unnecessary cross-KB coupling.
+# KMS access is only exercised later, during ingestion, not at KB
+# creation time, so there is no correctness reason to order it before KB
+# creation the way the other 3 (always-present) policy attachments are.
 
 # -----------------------------
 # Bedrock Knowledge Base + Data Source (AWSCC)
