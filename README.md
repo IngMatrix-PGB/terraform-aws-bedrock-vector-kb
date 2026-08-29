@@ -27,6 +27,8 @@ Only behavior that is actually implemented:
 - Managed S3 Vectors bucket + index, or bring-your-own existing S3 Vectors
   index ARN
 - A dedicated S3 bucket per Knowledge Base for source documents
+- Optional chunking configuration (fixed-size, hierarchical, semantic, or no
+  chunking), with validation of AWS's documented per-strategy constraints
 - Bucket versioning
 - S3 Block Public Access enforced on the documents bucket
 - TLS-only access enforced on the documents bucket via a bucket policy
@@ -96,7 +98,7 @@ consumers who never run these tests. See [CONTRIBUTING.md](CONTRIBUTING.md).
 | Name | Description | Type | Default | Required |
 | ---- | ----------- | ---- | ------- | :------: |
 | <a name="input_enable_kbs"></a> [enable\_kbs](#input\_enable\_kbs) | If false, nothing is created. | `bool` | `true` | no |
-| <a name="input_kbs"></a> [kbs](#input\_kbs) | Knowledge Bases definition map. | <pre>map(object({<br/>    kb_name             = string<br/>    role_name           = string<br/>    kb_description      = optional(string)<br/>    embedding_model_arn = string<br/><br/>    # Docs source<br/>    content_bucket = string<br/>    content_prefix = optional(string, "")<br/><br/>    # S3 Vectors: either create it, or provide an existing index ARN.<br/>    create_s3vectors          = optional(bool, false)<br/>    s3vectors_bucket_name     = optional(string)<br/>    s3vectors_index_name      = optional(string)<br/>    s3vectors_dimension       = optional(number, 1024)<br/>    s3vectors_distance_metric = optional(string, "cosine")  # cosine|euclidean<br/>    s3vectors_data_type       = optional(string, "float32") # currently float32<br/>    s3vectors_index_arn       = optional(string)            # used when create_s3vectors=false<br/><br/>    # Docs bucket encryption: bring your own KMS key. Default (null) keeps<br/>    # the existing SSE-S3 (AES256) behavior unchanged. Granting this<br/>    # module's IAM policy kms:Decrypt/kms:GenerateDataKey is not, by<br/>    # itself, sufficient - the key's own key policy must also allow the<br/>    # Bedrock execution role (this module does not manage the key or its<br/>    # key policy, since it only accepts an existing key ARN).<br/>    kms_key_arn = optional(string)<br/><br/>    # Docs bucket access logging: bring your own existing logging-destination<br/>    # bucket. Default (null) leaves logging disabled, unchanged from before.<br/>    # This module does not create or configure the destination bucket -<br/>    # it must already be set up to accept S3 access log delivery.<br/>    logging_target_bucket = optional(string)<br/>    logging_target_prefix = optional(string, "")<br/><br/>    # Docs bucket lifecycle: noncurrent object versions are kept forever<br/>    # unless this is set. null (default) = no automatic deletion of old<br/>    # versions, unchanged from before. When set, noncurrent versions older<br/>    # than this many days are expired. This is destructive retention<br/>    # behavior (it permanently deletes old version content, even though it<br/>    # never touches the current/live version) and is therefore<br/>    # consumer-opt-in only, never a default.<br/>    noncurrent_version_expiration_days = optional(number)<br/>  }))</pre> | n/a | yes |
+| <a name="input_kbs"></a> [kbs](#input\_kbs) | Knowledge Bases definition map. | <pre>map(object({<br/>    kb_name             = string<br/>    role_name           = string<br/>    kb_description      = optional(string)<br/>    embedding_model_arn = string<br/><br/>    # Docs source<br/>    content_bucket = string<br/>    content_prefix = optional(string, "")<br/><br/>    # Chunking strategy for this data source's ingestion. null (default,<br/>    # omitted) sends no vector_ingestion_configuration at all, so AWS<br/>    # applies its own default chunking behavior unchanged from v0.1.0.<br/>    # Exactly the block matching `strategy` may be set (enforced below):<br/>    #   FIXED_SIZE   -> fixed_size<br/>    #   HIERARCHICAL -> hierarchical<br/>    #   SEMANTIC     -> semantic<br/>    #   NONE         -> none of the three<br/>    chunking = optional(object({<br/>      strategy = string<br/><br/>      fixed_size = optional(object({<br/>        max_tokens         = number<br/>        overlap_percentage = number<br/>      }))<br/><br/>      hierarchical = optional(object({<br/>        level_configurations = list(object({<br/>          max_tokens = number<br/>        }))<br/>        overlap_tokens = number<br/>      }))<br/><br/>      semantic = optional(object({<br/>        max_tokens                      = number<br/>        buffer_size                     = number<br/>        breakpoint_percentile_threshold = number<br/>      }))<br/>    }), null)<br/><br/>    # S3 Vectors: either create it, or provide an existing index ARN.<br/>    create_s3vectors          = optional(bool, false)<br/>    s3vectors_bucket_name     = optional(string)<br/>    s3vectors_index_name      = optional(string)<br/>    s3vectors_dimension       = optional(number, 1024)<br/>    s3vectors_distance_metric = optional(string, "cosine")  # cosine|euclidean<br/>    s3vectors_data_type       = optional(string, "float32") # currently float32<br/>    s3vectors_index_arn       = optional(string)            # used when create_s3vectors=false<br/><br/>    # Docs bucket encryption: bring your own KMS key. Default (null) keeps<br/>    # the existing SSE-S3 (AES256) behavior unchanged. Granting this<br/>    # module's IAM policy kms:Decrypt/kms:GenerateDataKey is not, by<br/>    # itself, sufficient - the key's own key policy must also allow the<br/>    # Bedrock execution role (this module does not manage the key or its<br/>    # key policy, since it only accepts an existing key ARN).<br/>    kms_key_arn = optional(string)<br/><br/>    # Docs bucket access logging: bring your own existing logging-destination<br/>    # bucket. Default (null) leaves logging disabled, unchanged from before.<br/>    # This module does not create or configure the destination bucket -<br/>    # it must already be set up to accept S3 access log delivery.<br/>    logging_target_bucket = optional(string)<br/>    logging_target_prefix = optional(string, "")<br/><br/>    # Docs bucket lifecycle: noncurrent object versions are kept forever<br/>    # unless this is set. null (default) = no automatic deletion of old<br/>    # versions, unchanged from before. When set, noncurrent versions older<br/>    # than this many days are expired. This is destructive retention<br/>    # behavior (it permanently deletes old version content, even though it<br/>    # never touches the current/live version) and is therefore<br/>    # consumer-opt-in only, never a default.<br/>    noncurrent_version_expiration_days = optional(number)<br/>  }))</pre> | n/a | yes |
 | <a name="input_tags"></a> [tags](#input\_tags) | Extra tags. | `map(string)` | `{}` | no |
 
 ## Outputs
@@ -183,6 +185,29 @@ kbs = {
 }
 ```
 
+### Chunking
+
+```hcl
+kbs = {
+  default = {
+    # ...required fields as above...
+
+    chunking = {
+      strategy = "FIXED_SIZE"
+      fixed_size = {
+        max_tokens         = 512
+        overlap_percentage = 20
+      }
+    }
+  }
+}
+```
+
+Omitting `chunking` (the default) sends no chunking configuration at all, so
+AWS applies its own default (~300 tokens per chunk, sentence-boundary aware)
+- identical to this module's behavior before this field existed. See
+"Chunking" below for the full strategy reference and replacement semantics.
+
 ## KMS Boundary
 
 `kms_key_arn` is bring-your-own-key: this module never creates or manages a
@@ -216,6 +241,50 @@ side - this module cannot detect or prevent that.
   object, but the deletion of noncurrent versions themselves is real and
   irreversible, which is why it is opt-in rather than a default.
 
+## Chunking
+
+`kbs[*].chunking` (optional, default `null`) configures how Bedrock splits
+documents into chunks before embedding them. Supported strategies, per the
+`awscc_bedrock_data_source` provider schema:
+
+| Strategy | Sub-block | Required fields | Ranges |
+|---|---|---|---|
+| `FIXED_SIZE` | `fixed_size` | `max_tokens`, `overlap_percentage` | `max_tokens` 1-8192, `overlap_percentage` 1-99 |
+| `HIERARCHICAL` | `hierarchical` | `level_configurations` (exactly 2 entries, each `{ max_tokens }`), `overlap_tokens` | `overlap_tokens` >= 1, each level's `max_tokens` >= 1 |
+| `SEMANTIC` | `semantic` | `max_tokens`, `buffer_size`, `breakpoint_percentile_threshold` | `max_tokens` 1-8192, `buffer_size` 0-1, `breakpoint_percentile_threshold` 50-99 |
+| `NONE` | (none) | - | - |
+
+Exactly the sub-block matching `strategy` may be set; all others must be
+omitted. This exclusivity and the ranges above are enforced by this
+module's own `variable "kbs"` validation - the AWS API and the
+`awscc`/CloudFormation schemas only document these constraints in prose and
+accept invalid combinations until `apply` time, where they surface as an
+opaque `ValidationException`. Failing at `terraform plan` with a clear
+message is strictly better.
+
+For `HIERARCHICAL`, AWS requires exactly 2 `level_configurations` but does
+not document an ordering requirement between them; by convention, list the
+broader/parent level first and the narrower/child level second, but this
+module does not enforce that order.
+
+Omitting `chunking` entirely (the default) sends no
+`vector_ingestion_configuration` argument to `awscc_bedrock_data_source`, so
+AWS applies its own default chunking behavior (~300 tokens per chunk,
+respecting sentence boundaries) - unchanged from this module's behavior
+before this field existed.
+
+**Replacement semantics:** per the `AWS::Bedrock::DataSource` CloudFormation
+resource schema, `ChunkingConfiguration` is a `createOnlyProperty`. Changing
+`chunking` on an existing `kbs` entry - including adding it where it was
+previously omitted, or removing it - forces `awscc` to **replace** the
+underlying data source resource, not update it in place. Replacing the data
+source does **not** automatically re-run ingestion: any documents already
+ingested under the old data source are not retained or re-ingested
+automatically; a new `StartIngestionJob` against the new data source is
+required (see "Bedrock / Ingestion Boundary" below). This module does not
+use `lifecycle { prevent_destroy = true }` to mask this behavior - plan
+output will show the replacement plainly before you apply it.
+
 ## Bedrock / Ingestion Boundary
 
 Provisioning the S3 Data Source does **not** mean documents are
@@ -224,7 +293,10 @@ Bedrock requires an explicit ingestion job (`StartIngestionJob`, via the AWS
 Console, CLI, or SDK) to read the S3 documents, generate embeddings, and
 write them into the S3 Vectors index. This module does not trigger,
 schedule, or manage ingestion jobs - starting and monitoring ingestion is an
-operational action outside its scope.
+operational action outside its scope. This also applies after any chunking
+configuration change: changing `chunking` does not itself run
+`StartIngestionJob` - see "Chunking" above for why such a change also
+replaces the data source resource.
 
 ## Security Decisions
 

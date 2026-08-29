@@ -340,6 +340,47 @@ resource "aws_iam_role_policy_attachment" "s3_kms" {
 # creation time, so there is no correctness reason to order it before KB
 # creation the way the other 3 (always-present) policy attachments are.
 
+locals {
+  # Only present when the caller opts into chunking via kbs[*].chunking; null
+  # (the default) sends no vector_ingestion_configuration argument at all, so
+  # AWS applies its own default chunking behavior, unchanged from v0.1.0.
+  #
+  # NOTE ON REPLACEMENT: per the AWS::Bedrock::DataSource CloudFormation
+  # resource schema, ChunkingConfiguration is a createOnlyProperty - changing
+  # it (including turning it on/off) forces awscc to replace the data source,
+  # not update it in place. See README "Chunking" section.
+  chunking_vector_ingestion_configuration_by_kb = {
+    for k, v in local.enabled_kbs : k => (
+      try(v.chunking, null) == null ? null : {
+        chunking_configuration = merge(
+          { chunking_strategy = v.chunking.strategy },
+          v.chunking.strategy == "FIXED_SIZE" ? {
+            fixed_size_chunking_configuration = {
+              max_tokens         = v.chunking.fixed_size.max_tokens
+              overlap_percentage = v.chunking.fixed_size.overlap_percentage
+            }
+          } : {},
+          v.chunking.strategy == "HIERARCHICAL" ? {
+            hierarchical_chunking_configuration = {
+              overlap_tokens = v.chunking.hierarchical.overlap_tokens
+              level_configurations = [
+                for lvl in v.chunking.hierarchical.level_configurations : { max_tokens = lvl.max_tokens }
+              ]
+            }
+          } : {},
+          v.chunking.strategy == "SEMANTIC" ? {
+            semantic_chunking_configuration = {
+              max_tokens                      = v.chunking.semantic.max_tokens
+              buffer_size                     = v.chunking.semantic.buffer_size
+              breakpoint_percentile_threshold = v.chunking.semantic.breakpoint_percentile_threshold
+            }
+          } : {}
+        )
+      }
+    )
+  }
+}
+
 # -----------------------------
 # Bedrock Knowledge Base + Data Source (AWSCC)
 # -----------------------------
@@ -387,6 +428,8 @@ resource "awscc_bedrock_data_source" "s3" {
       } : {}
     )
   }
+
+  vector_ingestion_configuration = local.chunking_vector_ingestion_configuration_by_kb[each.key]
 
   depends_on = [
     aws_s3_bucket.kb_docs,

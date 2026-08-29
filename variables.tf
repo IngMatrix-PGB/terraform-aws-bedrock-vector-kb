@@ -16,6 +16,36 @@ variable "kbs" {
     content_bucket = string
     content_prefix = optional(string, "")
 
+    # Chunking strategy for this data source's ingestion. null (default,
+    # omitted) sends no vector_ingestion_configuration at all, so AWS
+    # applies its own default chunking behavior unchanged from v0.1.0.
+    # Exactly the block matching `strategy` may be set (enforced below):
+    #   FIXED_SIZE   -> fixed_size
+    #   HIERARCHICAL -> hierarchical
+    #   SEMANTIC     -> semantic
+    #   NONE         -> none of the three
+    chunking = optional(object({
+      strategy = string
+
+      fixed_size = optional(object({
+        max_tokens         = number
+        overlap_percentage = number
+      }))
+
+      hierarchical = optional(object({
+        level_configurations = list(object({
+          max_tokens = number
+        }))
+        overlap_tokens = number
+      }))
+
+      semantic = optional(object({
+        max_tokens                      = number
+        buffer_size                     = number
+        breakpoint_percentile_threshold = number
+      }))
+    }), null)
+
     # S3 Vectors: either create it, or provide an existing index ARN.
     create_s3vectors          = optional(bool, false)
     s3vectors_bucket_name     = optional(string)
@@ -85,6 +115,71 @@ variable "kbs" {
       )
     ])
     error_message = "noncurrent_version_expiration_days, when provided, must be a positive number of days."
+  }
+
+  validation { # chunking.strategy, when set, must be a supported value
+    condition = alltrue([
+      for k, v in var.kbs : (
+        try(v.chunking, null) == null ||
+        contains(["FIXED_SIZE", "HIERARCHICAL", "SEMANTIC", "NONE"], v.chunking.strategy)
+      )
+    ])
+    error_message = "kbs[*].chunking.strategy, when set, must be one of: FIXED_SIZE, HIERARCHICAL, SEMANTIC, NONE."
+  }
+
+  validation { # exactly the config block matching chunking.strategy may be set
+    condition = alltrue([
+      for k, v in var.kbs : (
+        try(v.chunking, null) == null ||
+        (
+          (v.chunking.strategy == "FIXED_SIZE") == (try(v.chunking.fixed_size, null) != null) &&
+          (v.chunking.strategy == "HIERARCHICAL") == (try(v.chunking.hierarchical, null) != null) &&
+          (v.chunking.strategy == "SEMANTIC") == (try(v.chunking.semantic, null) != null)
+        )
+      )
+    ])
+    error_message = "kbs[*].chunking: exactly one of fixed_size/hierarchical/semantic may be set, and it must match chunking.strategy (FIXED_SIZE with fixed_size, HIERARCHICAL with hierarchical, SEMANTIC with semantic); NONE must leave all three unset."
+  }
+
+  validation { # fixed_size ranges, independent of strategy so the message is always specific
+    condition = alltrue([
+      for k, v in var.kbs : (
+        try(v.chunking.fixed_size, null) == null ||
+        (
+          try(v.chunking.fixed_size.max_tokens >= 1 && v.chunking.fixed_size.max_tokens <= 8192, false) &&
+          try(v.chunking.fixed_size.overlap_percentage >= 1 && v.chunking.fixed_size.overlap_percentage <= 99, false)
+        )
+      )
+    ])
+    error_message = "kbs[*].chunking.fixed_size, when set: max_tokens must be between 1 and 8192, and overlap_percentage must be between 1 and 99."
+  }
+
+  validation { # semantic ranges
+    condition = alltrue([
+      for k, v in var.kbs : (
+        try(v.chunking.semantic, null) == null ||
+        (
+          try(v.chunking.semantic.max_tokens >= 1 && v.chunking.semantic.max_tokens <= 8192, false) &&
+          try(v.chunking.semantic.buffer_size >= 0 && v.chunking.semantic.buffer_size <= 1, false) &&
+          try(v.chunking.semantic.breakpoint_percentile_threshold >= 50 && v.chunking.semantic.breakpoint_percentile_threshold <= 99, false)
+        )
+      )
+    ])
+    error_message = "kbs[*].chunking.semantic, when set: max_tokens must be between 1 and 8192, buffer_size must be between 0 and 1, and breakpoint_percentile_threshold must be between 50 and 99."
+  }
+
+  validation { # hierarchical shape: exactly 2 levels, positive tokens
+    condition = alltrue([
+      for k, v in var.kbs : (
+        try(v.chunking.hierarchical, null) == null ||
+        (
+          try(length(v.chunking.hierarchical.level_configurations) == 2, false) &&
+          try(v.chunking.hierarchical.overlap_tokens >= 1, false) &&
+          try(alltrue([for lvl in v.chunking.hierarchical.level_configurations : lvl.max_tokens >= 1]), false)
+        )
+      )
+    ])
+    error_message = "kbs[*].chunking.hierarchical, when set: level_configurations must contain exactly 2 entries (each with a positive max_tokens), and overlap_tokens must be >= 1. AWS does not document an ordering requirement between the 2 levels; by convention, list level 1 (broader/parent chunks) before level 2 (narrower/child chunks), but this is not enforced here."
   }
 }
 

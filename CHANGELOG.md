@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Optional `chunking` configuration on each `kbs` entry, supporting all four
+  AWS-documented strategies (`FIXED_SIZE`, `HIERARCHICAL`, `SEMANTIC`,
+  `NONE`), wired into `awscc_bedrock_data_source`'s
+  `vector_ingestion_configuration`. Validation enforces AWS's documented
+  per-strategy exclusivity and numeric ranges at `terraform plan` time,
+  since the provider/CloudFormation schemas only document these
+  constraints in prose and otherwise fail late, at `apply`, with an opaque
+  `ValidationException`.
+- 13 new native `terraform test` cases covering omission (regression),
+  each valid strategy, each documented invalid range, invalid level counts
+  for `HIERARCHICAL`, mixed/invalid strategy combinations, and multiple
+  `kbs` entries using different strategies independently.
+
+### Changed
+
+- None. `chunking` defaults to `null` (omitted); omitting it sends no
+  `vector_ingestion_configuration` at all, so AWS's own default chunking
+  behavior (~300 tokens per chunk) is unchanged from v0.1.0. No existing
+  input, output, or resource address changes.
+
+### Known Limitations
+
+- Changing `chunking` on an existing `kbs` entry - including adding it
+  where previously omitted - replaces the underlying
+  `awscc_bedrock_data_source` resource, per the
+  `AWS::Bedrock::DataSource` CloudFormation schema
+  (`ChunkingConfiguration` is a `createOnlyProperty`). This module does
+  not mask that behavior with `lifecycle { prevent_destroy = true }`; see
+  the README's "Chunking" section.
+- Changing `chunking` does not itself trigger `StartIngestionJob` -
+  ingestion remains outside this module's scope (see "Bedrock / Ingestion
+  Boundary" in the README).
+
 ## [0.1.0] - 2026-08-28
 
 Initial public release.
