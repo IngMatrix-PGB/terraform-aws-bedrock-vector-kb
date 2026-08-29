@@ -119,3 +119,20 @@ jobs:
           #                  satisfy this scanner limitation was deliberately
           #                  not done - see PR #6 report.
           soft_fail_on: "CKV_AWS_144,CKV2_AWS_62,CKV_AWS_300"
+
+  docs:
+    name: terraform-docs drift check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      # Read-only: fails if README.md's generated tables are stale relative
+      # to variables.tf/outputs.tf/main.tf. Does not modify or commit
+      # anything (git-push is left at its default of false) - regenerating
+      # the docs locally (see CONTRIBUTING.md) and committing the result is
+      # still on the contributor.
+      - name: terraform-docs (fails on drift, no auto-commit)
+        uses: terraform-docs/gh-actions@v1.4.1
+        with:
+          config-file: .terraform-docs.yml
+          git-push: "false"
+          fail-on-diff: "true"
