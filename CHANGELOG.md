@@ -21,13 +21,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   each valid strategy, each documented invalid range, invalid level counts
   for `HIERARCHICAL`, mixed/invalid strategy combinations, and multiple
   `kbs` entries using different strategies independently.
+- Embedding model / vector dimension compatibility validation: each `kbs`
+  entry's `embedding_model_arn` / `s3vectors_dimension` pair is checked at
+  `terraform plan` time against a small internal map of models AWS
+  documents as supported for Knowledge Bases' vector embeddings. A known
+  model with an unsupported dimension fails early with a specific,
+  actionable message (model, configured dimension, allowed dimensions); a
+  model this module does not recognize always passes, so a new AWS model
+  never breaks the module. New optional `skip_dimension_validation` field
+  (default `false`) on each `kbs` entry, an explicit escape hatch for a
+  recognized model when the maintained map is stale.
+- 18 new native `terraform test` cases covering every model currently in
+  the compatibility map (valid and invalid dimensions), an unrecognized
+  model (must pass), an ARN shape the extraction logic doesn't recognize
+  (must pass, not crash), the `skip_dimension_validation` escape hatch, a
+  v0.1.0-style configuration (regression), multiple independently-validated
+  `kbs` entries, and interaction with PR #10's chunking configuration.
 
 ### Changed
 
 - None. `chunking` defaults to `null` (omitted); omitting it sends no
   `vector_ingestion_configuration` at all, so AWS's own default chunking
   behavior (~300 tokens per chunk) is unchanged from v0.1.0. No existing
-  input, output, or resource address changes.
+  input, output, or resource address changes. `skip_dimension_validation`
+  defaults to `false`; existing `kbs` entries (v0.1.0 and PR #10) already
+  use a known-valid model/dimension pair and are unaffected.
 
 ### Known Limitations
 
@@ -38,6 +56,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   (`ChunkingConfiguration` is a `createOnlyProperty`). This module does
   not mask that behavior with `lifecycle { prevent_destroy = true }`; see
   the README's "Chunking" section.
+- The embedding model / dimension compatibility map is a maintained
+  snapshot, not a live or exhaustive source - see the README's "Embedding
+  Model / Dimension Compatibility" section for what's included, what's
+  deliberately excluded, and why.
 - Changing `chunking` does not itself trigger `StartIngestionJob` -
   ingestion remains outside this module's scope (see "Bedrock / Ingestion
   Boundary" in the README).

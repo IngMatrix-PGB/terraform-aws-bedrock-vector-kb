@@ -4,6 +4,44 @@ variable "enable_kbs" {
   default     = true
 }
 
+# Embedding models AWS documents as supported for Bedrock Knowledge Bases'
+# vector embeddings, mapped to their Knowledge-Bases-supported output
+# dimensions, per https://docs.aws.amazon.com/bedrock/latest/userguide/
+# knowledge-base-supported.html (current as of this module's PR #11).
+#
+# This map is a point-in-time snapshot, not an exhaustive or permanent list:
+# AWS adds embedding models and dimension options over time (observed
+# roughly every 4-5 months historically), and this module has no way to
+# query that support dynamically - neither the Bedrock API
+# (GetFoundationModel/ListFoundationModels) nor the aws_bedrock_foundation_model
+# Terraform data source expose a "supported dimensions" field at all. A
+# model that is not a key in this map is treated as UNKNOWN and always
+# passes the compatibility check below (see the kbs validation) - this
+# keeps the module usable with any embedding model AWS releases after this
+# map was last updated, at the cost of not catching a bad dimension for
+# models this map doesn't yet know about.
+#
+# Deliberately excluded, despite appearing to be embedding-model options
+# with a Knowledge-Bases-published dimension: Cohere Embed v4 (its model ID
+# in Bedrock's own KB-embeddings table is inconsistently rendered elsewhere
+# in AWS's docs, and it is not listed in the KB embeddings model/ID table
+# itself) and "Cohere Embed v3 (Multimodal)" (it appears as a named row in
+# the KB dimensions table but has no corresponding entry in Bedrock's model
+# catalog or model-ID table under any Cohere model card - its exact
+# Knowledge-Bases model ID cannot be confirmed). Both are left out rather
+# than guessed at; see the README's "Embedding Model / Dimension
+# Compatibility" section.
+locals {
+  known_embedding_model_dimensions = {
+    "amazon.titan-embed-text-v1"               = [1536]
+    "amazon.titan-embed-text-v2:0"             = [256, 512, 1024]
+    "cohere.embed-english-v3"                  = [1024]
+    "cohere.embed-multilingual-v3"             = [1024]
+    "amazon.titan-embed-image-v1"              = [1024]
+    "amazon.nova-2-multimodal-embeddings-v1:0" = [1024]
+  }
+}
+
 variable "kbs" {
   description = "Knowledge Bases definition map."
   type = map(object({
@@ -11,6 +49,16 @@ variable "kbs" {
     role_name           = string
     kb_description      = optional(string)
     embedding_model_arn = string
+
+    # Explicit escape hatch for the compatibility check below (see
+    # known_embedding_model_dimensions). Only meaningful for a model this
+    # module already recognizes: set to true when the maintained map is
+    # stale (AWS expanded the model's valid dimensions, or documentation
+    # changed before this module was updated) and you have independently
+    # confirmed the pair is valid. Unknown/future models never need this -
+    # they already pass automatically since the module cannot validate what
+    # it doesn't recognize.
+    skip_dimension_validation = optional(bool, false)
 
     # Docs source
     content_bucket = string
@@ -180,6 +228,53 @@ variable "kbs" {
       )
     ])
     error_message = "kbs[*].chunking.hierarchical, when set: level_configurations must contain exactly 2 entries (each with a positive max_tokens), and overlap_tokens must be >= 1. AWS does not document an ordering requirement between the 2 levels; by convention, list level 1 (broader/parent chunks) before level 2 (narrower/child chunks), but this is not enforced here."
+  }
+
+  # Embedding model / vector dimension compatibility.
+  #
+  # The model ID is extracted from embedding_model_arn inline (not via a
+  # separate local) because a variable's own validation block cannot
+  # reference any local that itself depends on that same variable - doing
+  # so is a genuine dependency cycle in Terraform 1.15.5, confirmed
+  # empirically while designing this validation, not merely a historical
+  # restriction. local.known_embedding_model_dimensions is safe to
+  # reference here because it is a constant, independent of var.kbs.
+  #
+  # An ARN that doesn't match Bedrock's foundation-model ARN shape
+  # (arn:aws:bedrock:<region>::foundation-model/<model-id>) yields model_id
+  # = null via try(), which is treated as UNKNOWN below - this validation
+  # never crashes on an unfamiliar ARN shape, and any separate ARN-format
+  # validation this module may add later stays fully independent of this
+  # compatibility check.
+  validation {
+    condition = alltrue(flatten([
+      for k, v in var.kbs : [
+        for model_id in [try(regex("^arn:aws:bedrock:[^:]*:[^:]*:foundation-model/(.+)$", v.embedding_model_arn)[0], null)] : (
+          try(v.skip_dimension_validation, false) == true ||
+          model_id == null ||
+          !contains(keys(local.known_embedding_model_dimensions), model_id) ||
+          contains(local.known_embedding_model_dimensions[model_id], v.s3vectors_dimension)
+        )
+      ]
+    ]))
+
+    error_message = join(" ", [
+      "One or more kbs entries use a known embedding model with an unsupported vector dimension:",
+      join("; ", flatten([
+        for k, v in var.kbs : [
+          for model_id in [try(regex("^arn:aws:bedrock:[^:]*:[^:]*:foundation-model/(.+)$", v.embedding_model_arn)[0], null)] : (
+            "kbs[\"${k}\"]: embedding model ${model_id} does not support vector dimension ${v.s3vectors_dimension}. Allowed dimensions: ${join(", ", try(local.known_embedding_model_dimensions[model_id], []))}."
+          )
+          if !(
+            try(v.skip_dimension_validation, false) == true ||
+            model_id == null ||
+            !contains(keys(local.known_embedding_model_dimensions), model_id) ||
+            contains(local.known_embedding_model_dimensions[model_id], v.s3vectors_dimension)
+          )
+        ]
+      ])),
+      "Set skip_dimension_validation = true on the specific kbs entry to bypass this check if you have confirmed the model now supports this dimension."
+    ])
   }
 }
 

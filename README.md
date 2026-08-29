@@ -29,6 +29,9 @@ Only behavior that is actually implemented:
 - A dedicated S3 bucket per Knowledge Base for source documents
 - Optional chunking configuration (fixed-size, hierarchical, semantic, or no
   chunking), with validation of AWS's documented per-strategy constraints
+- Embedding model / vector dimension compatibility validation for
+  AWS-documented models, with forward compatibility for unrecognized models
+  and an explicit opt-out escape hatch
 - Bucket versioning
 - S3 Block Public Access enforced on the documents bucket
 - TLS-only access enforced on the documents bucket via a bucket policy
@@ -98,7 +101,7 @@ consumers who never run these tests. See [CONTRIBUTING.md](CONTRIBUTING.md).
 | Name | Description | Type | Default | Required |
 | ---- | ----------- | ---- | ------- | :------: |
 | <a name="input_enable_kbs"></a> [enable\_kbs](#input\_enable\_kbs) | If false, nothing is created. | `bool` | `true` | no |
-| <a name="input_kbs"></a> [kbs](#input\_kbs) | Knowledge Bases definition map. | <pre>map(object({<br/>    kb_name             = string<br/>    role_name           = string<br/>    kb_description      = optional(string)<br/>    embedding_model_arn = string<br/><br/>    # Docs source<br/>    content_bucket = string<br/>    content_prefix = optional(string, "")<br/><br/>    # Chunking strategy for this data source's ingestion. null (default,<br/>    # omitted) sends no vector_ingestion_configuration at all, so AWS<br/>    # applies its own default chunking behavior unchanged from v0.1.0.<br/>    # Exactly the block matching `strategy` may be set (enforced below):<br/>    #   FIXED_SIZE   -> fixed_size<br/>    #   HIERARCHICAL -> hierarchical<br/>    #   SEMANTIC     -> semantic<br/>    #   NONE         -> none of the three<br/>    chunking = optional(object({<br/>      strategy = string<br/><br/>      fixed_size = optional(object({<br/>        max_tokens         = number<br/>        overlap_percentage = number<br/>      }))<br/><br/>      hierarchical = optional(object({<br/>        level_configurations = list(object({<br/>          max_tokens = number<br/>        }))<br/>        overlap_tokens = number<br/>      }))<br/><br/>      semantic = optional(object({<br/>        max_tokens                      = number<br/>        buffer_size                     = number<br/>        breakpoint_percentile_threshold = number<br/>      }))<br/>    }), null)<br/><br/>    # S3 Vectors: either create it, or provide an existing index ARN.<br/>    create_s3vectors          = optional(bool, false)<br/>    s3vectors_bucket_name     = optional(string)<br/>    s3vectors_index_name      = optional(string)<br/>    s3vectors_dimension       = optional(number, 1024)<br/>    s3vectors_distance_metric = optional(string, "cosine")  # cosine|euclidean<br/>    s3vectors_data_type       = optional(string, "float32") # currently float32<br/>    s3vectors_index_arn       = optional(string)            # used when create_s3vectors=false<br/><br/>    # Docs bucket encryption: bring your own KMS key. Default (null) keeps<br/>    # the existing SSE-S3 (AES256) behavior unchanged. Granting this<br/>    # module's IAM policy kms:Decrypt/kms:GenerateDataKey is not, by<br/>    # itself, sufficient - the key's own key policy must also allow the<br/>    # Bedrock execution role (this module does not manage the key or its<br/>    # key policy, since it only accepts an existing key ARN).<br/>    kms_key_arn = optional(string)<br/><br/>    # Docs bucket access logging: bring your own existing logging-destination<br/>    # bucket. Default (null) leaves logging disabled, unchanged from before.<br/>    # This module does not create or configure the destination bucket -<br/>    # it must already be set up to accept S3 access log delivery.<br/>    logging_target_bucket = optional(string)<br/>    logging_target_prefix = optional(string, "")<br/><br/>    # Docs bucket lifecycle: noncurrent object versions are kept forever<br/>    # unless this is set. null (default) = no automatic deletion of old<br/>    # versions, unchanged from before. When set, noncurrent versions older<br/>    # than this many days are expired. This is destructive retention<br/>    # behavior (it permanently deletes old version content, even though it<br/>    # never touches the current/live version) and is therefore<br/>    # consumer-opt-in only, never a default.<br/>    noncurrent_version_expiration_days = optional(number)<br/>  }))</pre> | n/a | yes |
+| <a name="input_kbs"></a> [kbs](#input\_kbs) | Knowledge Bases definition map. | <pre>map(object({<br/>    kb_name             = string<br/>    role_name           = string<br/>    kb_description      = optional(string)<br/>    embedding_model_arn = string<br/><br/>    # Explicit escape hatch for the compatibility check below (see<br/>    # known_embedding_model_dimensions). Only meaningful for a model this<br/>    # module already recognizes: set to true when the maintained map is<br/>    # stale (AWS expanded the model's valid dimensions, or documentation<br/>    # changed before this module was updated) and you have independently<br/>    # confirmed the pair is valid. Unknown/future models never need this -<br/>    # they already pass automatically since the module cannot validate what<br/>    # it doesn't recognize.<br/>    skip_dimension_validation = optional(bool, false)<br/><br/>    # Docs source<br/>    content_bucket = string<br/>    content_prefix = optional(string, "")<br/><br/>    # Chunking strategy for this data source's ingestion. null (default,<br/>    # omitted) sends no vector_ingestion_configuration at all, so AWS<br/>    # applies its own default chunking behavior unchanged from v0.1.0.<br/>    # Exactly the block matching `strategy` may be set (enforced below):<br/>    #   FIXED_SIZE   -> fixed_size<br/>    #   HIERARCHICAL -> hierarchical<br/>    #   SEMANTIC     -> semantic<br/>    #   NONE         -> none of the three<br/>    chunking = optional(object({<br/>      strategy = string<br/><br/>      fixed_size = optional(object({<br/>        max_tokens         = number<br/>        overlap_percentage = number<br/>      }))<br/><br/>      hierarchical = optional(object({<br/>        level_configurations = list(object({<br/>          max_tokens = number<br/>        }))<br/>        overlap_tokens = number<br/>      }))<br/><br/>      semantic = optional(object({<br/>        max_tokens                      = number<br/>        buffer_size                     = number<br/>        breakpoint_percentile_threshold = number<br/>      }))<br/>    }), null)<br/><br/>    # S3 Vectors: either create it, or provide an existing index ARN.<br/>    create_s3vectors          = optional(bool, false)<br/>    s3vectors_bucket_name     = optional(string)<br/>    s3vectors_index_name      = optional(string)<br/>    s3vectors_dimension       = optional(number, 1024)<br/>    s3vectors_distance_metric = optional(string, "cosine")  # cosine|euclidean<br/>    s3vectors_data_type       = optional(string, "float32") # currently float32<br/>    s3vectors_index_arn       = optional(string)            # used when create_s3vectors=false<br/><br/>    # Docs bucket encryption: bring your own KMS key. Default (null) keeps<br/>    # the existing SSE-S3 (AES256) behavior unchanged. Granting this<br/>    # module's IAM policy kms:Decrypt/kms:GenerateDataKey is not, by<br/>    # itself, sufficient - the key's own key policy must also allow the<br/>    # Bedrock execution role (this module does not manage the key or its<br/>    # key policy, since it only accepts an existing key ARN).<br/>    kms_key_arn = optional(string)<br/><br/>    # Docs bucket access logging: bring your own existing logging-destination<br/>    # bucket. Default (null) leaves logging disabled, unchanged from before.<br/>    # This module does not create or configure the destination bucket -<br/>    # it must already be set up to accept S3 access log delivery.<br/>    logging_target_bucket = optional(string)<br/>    logging_target_prefix = optional(string, "")<br/><br/>    # Docs bucket lifecycle: noncurrent object versions are kept forever<br/>    # unless this is set. null (default) = no automatic deletion of old<br/>    # versions, unchanged from before. When set, noncurrent versions older<br/>    # than this many days are expired. This is destructive retention<br/>    # behavior (it permanently deletes old version content, even though it<br/>    # never touches the current/live version) and is therefore<br/>    # consumer-opt-in only, never a default.<br/>    noncurrent_version_expiration_days = optional(number)<br/>  }))</pre> | n/a | yes |
 | <a name="input_tags"></a> [tags](#input\_tags) | Extra tags. | `map(string)` | `{}` | no |
 
 ## Outputs
@@ -208,6 +211,24 @@ AWS applies its own default (~300 tokens per chunk, sentence-boundary aware)
 - identical to this module's behavior before this field existed. See
 "Chunking" below for the full strategy reference and replacement semantics.
 
+### Bypassing embedding model / dimension validation
+
+```hcl
+kbs = {
+  default = {
+    # ...required fields as above...
+    embedding_model_arn       = "arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-embed-text-v2:0"
+    s3vectors_dimension       = 1536
+    skip_dimension_validation = true
+  }
+}
+```
+
+Only needed when this module's known-model map is stale for a model it
+already recognizes (see "Embedding Model / Dimension Compatibility" below).
+Models this module doesn't recognize never need this flag - they already
+pass validation automatically.
+
 ## KMS Boundary
 
 `kms_key_arn` is bring-your-own-key: this module never creates or manages a
@@ -284,6 +305,80 @@ automatically; a new `StartIngestionJob` against the new data source is
 required (see "Bedrock / Ingestion Boundary" below). This module does not
 use `lifecycle { prevent_destroy = true }` to mask this behavior - plan
 output will show the replacement plainly before you apply it.
+
+## Embedding Model / Dimension Compatibility
+
+Amazon Bedrock rejects an embedding model / vector dimension pair it
+doesn't support only at `apply` time (`CreateKnowledgeBase` /
+`UpdateKnowledgeBase` `ValidationException`), with no dry-run available and
+no dynamic AWS API this module could query to check compatibility ahead of
+time - neither `GetFoundationModel`/`ListFoundationModels` nor Terraform's
+own `aws_bedrock_foundation_model` data source expose a "supported output
+dimensions" field for any model, at all. This module closes part of that gap
+by validating each `kbs` entry's `embedding_model_arn` /
+`s3vectors_dimension` pair against a small internal map of models AWS
+documents as supported for Knowledge Bases' vector embeddings, at
+`terraform plan` time, before anything is created.
+
+This map is a point-in-time snapshot of AWS's own [Knowledge Bases
+supported-models documentation](https://docs.aws.amazon.com/bedrock/latest/userguide/knowledge-base-supported.html),
+current as of this module's PR #11 - **not** an exhaustive or permanent
+list. AWS adds embedding models and expands dimension options over time.
+Three behaviors follow directly from that:
+
+- A **known** model with a **known-invalid** dimension fails at `plan`
+  time with a specific, actionable error (naming the model, the configured
+  dimension, and the allowed dimensions) instead of a generic
+  `ValidationException` at `apply`.
+- An **unknown** model (anything not in this module's map - including any
+  model AWS releases after this module was last updated) always **passes**
+  validation unconditionally. This module has no way to know whether a
+  model it has never heard of is compatible with a given dimension, so it
+  does not guess either way; catching that class of mistake is left to AWS
+  itself at `apply` time, same as before this validation existed.
+- `skip_dimension_validation` (per `kbs` entry, default `false`) is an
+  explicit escape hatch for a model this module **does** recognize, for
+  when the map is stale - AWS expanded a model's valid dimensions, or
+  documentation changed before this module was updated. It does not exist
+  to bypass validation for unknown models; those already pass without it.
+
+Models currently in the map:
+
+| Model ID | KB-supported dimensions |
+|---|---|
+| `amazon.titan-embed-text-v1` | 1536 |
+| `amazon.titan-embed-text-v2:0` | 256, 512, 1024 |
+| `cohere.embed-english-v3` | 1024 |
+| `cohere.embed-multilingual-v3` | 1024 |
+| `amazon.titan-embed-image-v1` | 1024 |
+| `amazon.nova-2-multimodal-embeddings-v1:0` | 1024 |
+
+Deliberately **not** included, despite appearing adjacent to this list in
+AWS's own documentation: Cohere Embed v4 (model ID rendered inconsistently
+across AWS's docs, and absent from the Knowledge Bases model/ID table
+itself) and a "Cohere Embed v3 (Multimodal)" row that appears in the
+Knowledge Bases dimensions table but has no corresponding model card or
+model ID anywhere in Bedrock's own model catalog. Both are left out rather
+than guessed at.
+
+**A note on `amazon.nova-2-multimodal-embeddings-v1:0` specifically:** its
+own Bedrock model card lists "Knowledge base" as an unsupported feature in
+its general `bedrock-runtime` capability matrix. That capability matrix
+describes using a model as the *generation* model inside a Knowledge
+Base's `RetrieveAndGenerate` call, which requires text output - this model
+is embedding-only, so it cannot serve that role, unrelated to whether it is
+usable as the *embedding* model behind a Knowledge Base's vector index.
+The claim of KB compatibility in the table above is scoped specifically to
+that narrower, embedding-model question, sourced from Bedrock's dedicated
+[Knowledge Bases supported-embedding-models
+documentation](https://docs.aws.amazon.com/bedrock/latest/userguide/knowledge-base-supported.html#knowledge-base-supported-embeddings),
+which does list it. This module does not claim the model is universally
+supported across all Bedrock Knowledge Base execution paths - only that it
+is documented as an eligible embedding model. It remains in the map on that
+basis; it would be removed only if newer official AWS evidence directly
+contradicted its eligibility as a KB embedding model, not merely on the
+strength of this one capability-matrix flag, which describes a different
+capability.
 
 ## Bedrock / Ingestion Boundary
 
