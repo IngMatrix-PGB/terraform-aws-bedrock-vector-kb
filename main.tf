@@ -23,7 +23,7 @@ resource "aws_s3vectors_vector_bucket" "this" {
 
   tags = merge(var.tags, {
     Name    = each.value.s3vectors_bucket_name
-    Module  = "matrix-vector-nexus"
+    Module  = "bedrock-vector-kb"
     Service = "s3vectors"
   })
 }
@@ -39,7 +39,7 @@ resource "aws_s3vectors_index" "this" {
 
   tags = merge(var.tags, {
     Name    = each.value.s3vectors_index_name
-    Module  = "matrix-vector-nexus"
+    Module  = "bedrock-vector-kb"
     Service = "s3vectors"
   })
 
@@ -78,7 +78,7 @@ resource "aws_s3_bucket" "kb_docs" {
 
   tags = merge(var.tags, {
     Name    = each.value.content_bucket
-    Module  = "matrix-vector-nexus"
+    Module  = "bedrock-vector-kb"
     Service = "bedrock-kb-docs"
   })
 }
@@ -219,7 +219,7 @@ resource "aws_iam_role" "bedrock_kb" {
 
   tags = merge(var.tags, {
     Name    = each.value.role_name
-    Module  = "matrix-vector-nexus"
+    Module  = "bedrock-vector-kb"
     Service = "bedrock-kb"
   })
 }

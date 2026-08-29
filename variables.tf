@@ -1,17 +1,3 @@
-# tflint-ignore: terraform_unused_declarations # reserved/no-op input kept intentionally (see PR #1); removal would break existing callers.
-variable "kb_prefix" {
-  description = "Reserved for future use. Not currently applied to any resource name or tag by this module. Accepted for forward/backward compatibility; safe to omit."
-  type        = string
-  default     = "matrix"
-}
-
-# tflint-ignore: terraform_unused_declarations # reserved/no-op input kept intentionally (see PR #1); removal would break existing callers.
-variable "account_id" {
-  description = "Reserved for future use. Not currently referenced by any resource, local, or output in this module. Accepted for forward/backward compatibility; safe to omit."
-  type        = string
-  default     = ""
-}
-
 variable "enable_kbs" {
   description = "If false, nothing is created."
   type        = bool
@@ -38,9 +24,6 @@ variable "kbs" {
     s3vectors_distance_metric = optional(string, "cosine")  # cosine|euclidean
     s3vectors_data_type       = optional(string, "float32") # currently float32
     s3vectors_index_arn       = optional(string)            # used when create_s3vectors=false
-
-    # Reserved: accepted but not yet wired to any resource in this module (no-op today).
-    enable_bedrock_data_automation = optional(bool, false)
 
     # Docs bucket encryption: bring your own KMS key. Default (null) keeps
     # the existing SSE-S3 (AES256) behavior unchanged. Granting this
