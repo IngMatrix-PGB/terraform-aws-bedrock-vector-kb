@@ -72,6 +72,11 @@ locals {
     for k, v in local.enabled_kbs : k => v
     if try(v.expose_ingestion_policy, false) == true
   }
+
+  kbs_with_ingestion_logging = {
+    for k, v in local.enabled_kbs : k => v
+    if try(v.ingestion_logging, null) != null
+  }
 }
 
 # -----------------------------
@@ -458,6 +463,32 @@ locals {
       }]
     })
   }
+}
+
+# Optional, per-KB AWS Logs vended-log delivery for this KB's APPLICATION_LOGS
+# (ingestion/document-status events). This module owns only the delivery
+# SOURCE and the source-to-destination LINK - it never creates the delivery
+# DESTINATION (CloudWatch Logs, S3, or Data Firehose), a log group/bucket/
+# stream, or a cross-account destination policy. The caller supplies an
+# EXISTING delivery destination ARN; that destination must already exist,
+# same as AWS's own API requires. See the README's "Ingestion Log Delivery"
+# section for the full rationale (multiple KBs may intentionally point at
+# the same destination ARN - AWS explicitly supports many delivery sources
+# sending to one destination, so this module does not attempt to deduplicate
+# or share a destination resource it never creates in the first place).
+resource "aws_cloudwatch_log_delivery_source" "ingestion" {
+  for_each = local.kbs_with_ingestion_logging
+
+  name         = "${each.value.kb_name}-ingestion-logs"
+  log_type     = "APPLICATION_LOGS"
+  resource_arn = awscc_bedrock_knowledge_base.this[each.key].knowledge_base_arn
+}
+
+resource "aws_cloudwatch_log_delivery" "ingestion" {
+  for_each = local.kbs_with_ingestion_logging
+
+  delivery_source_name     = aws_cloudwatch_log_delivery_source.ingestion[each.key].name
+  delivery_destination_arn = each.value.ingestion_logging.delivery_destination_arn
 }
 
 resource "awscc_bedrock_data_source" "s3" {

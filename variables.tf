@@ -70,6 +70,19 @@ variable "kbs" {
     # README for why, and for who should use the resulting document.
     expose_ingestion_policy = optional(bool, false)
 
+    # When set, this module creates an AWS Logs vended-log delivery pipe
+    # (aws_cloudwatch_log_delivery_source + aws_cloudwatch_log_delivery) for
+    # this KB's APPLICATION_LOGS (ingestion/document-status events), sending
+    # them to an EXISTING delivery destination the caller already owns. This
+    # module never creates the destination (CloudWatch Logs, S3, or Data
+    # Firehose) or an aws_cloudwatch_log_delivery_destination resource -
+    # only the source and the source-to-destination link. Default null
+    # (omitted) creates neither resource. See the README's "Ingestion Log
+    # Delivery" section.
+    ingestion_logging = optional(object({
+      delivery_destination_arn = string
+    }))
+
     # Docs source
     content_bucket = string
     content_prefix = optional(string, "")
@@ -285,6 +298,56 @@ variable "kbs" {
       ])),
       "Set skip_dimension_validation = true on the specific kbs entry to bypass this check if you have confirmed the model now supports this dimension."
     ])
+  }
+
+  validation { # ingestion_logging.delivery_destination_arn, when set, must not be empty/whitespace-only
+    condition = alltrue([
+      for k, v in var.kbs : (
+        try(v.ingestion_logging, null) == null || trimspace(v.ingestion_logging.delivery_destination_arn) != ""
+      )
+    ])
+    error_message = "ingestion_logging.delivery_destination_arn, when set, must not be empty or whitespace-only. This module does not validate the ARN's format or destination type beyond that - AWS is the authority on whether it names a valid delivery destination."
+  }
+
+  validation { # the derived delivery source name ("${kb_name}-ingestion-logs") must fit AWS's 60-character limit
+    condition = alltrue([
+      for k, v in var.kbs : (
+        try(v.ingestion_logging, null) == null || length("${v.kb_name}-ingestion-logs") <= 60
+      )
+    ])
+    error_message = "kbs[*].kb_name is too long to derive a delivery source name (\"$${kb_name}-ingestion-logs\" must be at most 60 characters, per PutDeliverySource's name constraint) for an entry with ingestion_logging set. Shorten kb_name for that entry."
+  }
+
+  validation { # the derived delivery source name must match PutDeliverySource's [\w-]* charset (word characters and hyphens only)
+    # This module does not restrict kb_name's charset globally - kb_name has
+    # no format validation elsewhere in this module, and AWS's own
+    # CreateKnowledgeBase API is the authority on whether it's a valid KB
+    # name. This check exists only because the DERIVED delivery source name
+    # has a stricter, distinct charset requirement, and only applies when
+    # ingestion_logging is set.
+    #
+    # In practice, this specific check is unreachable for any kb_name value
+    # awscc_bedrock_knowledge_base would ever actually accept:
+    # awscc_bedrock_knowledge_base's own "name" attribute already enforces
+    # ^([0-9a-zA-Z][_-]?){1,100}$, whose character set (alphanumeric,
+    # underscore, hyphen) is always a subset of PutDeliverySource's [\w-]*
+    # - there is no string that satisfies the KB's own name pattern but
+    # violates this one. It is kept anyway because it fires earlier (during
+    # variable validation, before any resource is planned) with a clearer,
+    # ingestion_logging-specific message than the generic provider-level
+    # schema error a consumer would otherwise see, and as a safeguard
+    # against these two independent constraints ever diverging in the
+    # future. The 60-character length validation just above this one is
+    # the one that is actually reachable in practice - a kb_name can easily
+    # be valid for the KB (up to 100 characters) while being too long once
+    # "-ingestion-logs" is appended (over DeliverySource's 60-character
+    # limit).
+    condition = alltrue([
+      for k, v in var.kbs : (
+        try(v.ingestion_logging, null) == null || can(regex("^[\\w-]*$", "${v.kb_name}-ingestion-logs"))
+      )
+    ])
+    error_message = "kbs[*].kb_name contains a character that is not valid in a derived delivery source name (\"$${kb_name}-ingestion-logs\" must match PutDeliverySource's required pattern [\\w-]* - letters, digits, underscore, and hyphen only) for an entry with ingestion_logging set. This does not restrict kb_name in general - only entries with ingestion_logging set are affected."
   }
 }
 

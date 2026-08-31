@@ -25,6 +25,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `knowledge_base_arns`, and `ingestion_policy_documents` are unchanged, and
   interaction coverage with chunking, model/dimension validation, and
   `expose_ingestion_policy`.
+- New optional `ingestion_logging` field on each `kbs` entry
+  (`{ delivery_destination_arn = string }`), creating an
+  `aws_cloudwatch_log_delivery_source` and `aws_cloudwatch_log_delivery` to
+  send that KB's `APPLICATION_LOGS` (per-document ingestion status events)
+  to an existing CloudWatch Logs, S3, or Data Firehose destination. This
+  module never creates the destination itself - no log group, bucket,
+  Firehose stream, `aws_cloudwatch_log_delivery_destination`, or
+  destination policy. Multiple `kbs` entries may intentionally share the
+  same destination ARN; no deduplication logic is needed since the shared
+  resource was never module-owned. New outputs
+  `ingestion_log_delivery_source_arns` and `ingestion_log_delivery_arns`.
+- 12 new native `terraform test` cases covering: default (zero resources),
+  single-KB exact wiring (`log_type`, `resource_arn`, deterministic naming,
+  destination ARN), mixed multi-KB opt-in, two KBs intentionally sharing
+  one destination, two KBs with distinct destinations, `enable_kbs = false`
+  (zero resources), empty/whitespace `delivery_destination_arn` (hard
+  validation failure), and interaction coverage with chunking, model/
+  dimension validation, `expose_ingestion_policy`, the PR #14 operational
+  status outputs, and KMS.
+
+### Security
+
+- Documented (not granted) the apply-time IAM permissions
+  `bedrock:AllowVendedLogDeliveryForResource` and the `logs:*DeliverySource`/
+  `logs:*Delivery` actions needed to create the two new resources. These
+  are prerequisites for whoever runs `terraform apply` - this module does
+  not attach them to `aws_iam_role.bedrock_kb` or any other principal it
+  creates.
+
+### Known Limitations
+
+- `ingestion_logging` does not create the delivery destination
+  (CloudWatch Logs, S3, or Data Firehose) - the caller must already own
+  one, since AWS's own API requires the destination to pre-exist.
+- Same-account delivery only; cross-account delivery destinations (which
+  require a `PutDeliveryDestinationPolicy`-configured resource policy on
+  the destination) are not implemented.
+- The derived delivery source name (`"${kb_name}-ingestion-logs"`) must fit
+  AWS's 60-character limit for delivery source names; this module validates
+  that at `terraform plan` time rather than letting AWS reject it later.
 
 ## [0.2.0] - 2026-08-30
 

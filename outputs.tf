@@ -37,3 +37,13 @@ output "ingestion_policy_documents" {
   description = "IAM policy documents (JSON), keyed by kbs entry, granting the minimal permissions (bedrock:StartIngestionJob, GetIngestionJob, ListIngestionJobs) an external actor needs to manage ingestion for that KB, scoped to its ARN. Only present for kbs entries with expose_ingestion_policy = true; this module does not create or attach any IAM resource from this document itself - attach it (as a managed or inline policy) to whatever principal is responsible for triggering and monitoring ingestion. See the README's \"Bedrock / Ingestion Boundary\" section."
   value       = local.ingestion_policy_documents
 }
+
+output "ingestion_log_delivery_source_arns" {
+  description = "ARNs of the aws_cloudwatch_log_delivery_source resources created for this KB's APPLICATION_LOGS (ingestion/document-status events), keyed by kbs entry. Only present for entries with ingestion_logging set. This module never creates the delivery destination - see the README's \"Ingestion Log Delivery\" section."
+  value       = { for k, v in aws_cloudwatch_log_delivery_source.ingestion : k => v.arn }
+}
+
+output "ingestion_log_delivery_arns" {
+  description = "ARNs of the aws_cloudwatch_log_delivery resources (the source-to-destination link) created for this KB's ingestion log delivery, keyed by kbs entry. Only present for entries with ingestion_logging set."
+  value       = { for k, v in aws_cloudwatch_log_delivery.ingestion : k => v.arn }
+}

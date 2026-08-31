@@ -38,6 +38,9 @@ Only behavior that is actually implemented:
 - Knowledge Base / data source status outputs and data source ID outputs,
   reflecting the most recently refreshed Terraform state (not continuous
   monitoring)
+- Optional per-KB ingestion log delivery (`APPLICATION_LOGS`) to an
+  existing CloudWatch Logs, S3, or Data Firehose destination you already
+  own - this module never creates the destination itself
 - Bucket versioning
 - S3 Block Public Access enforced on the documents bucket
 - TLS-only access enforced on the documents bucket via a bucket policy
@@ -81,6 +84,8 @@ consumers who never run these tests. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 | Name | Type |
 | ---- | ---- |
+| [aws_cloudwatch_log_delivery.ingestion](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_log_delivery) | resource |
+| [aws_cloudwatch_log_delivery_source.ingestion](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_log_delivery_source) | resource |
 | [aws_iam_policy.bedrock_invoke_model](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_policy) | resource |
 | [aws_iam_policy.kb_s3_kms](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_policy) | resource |
 | [aws_iam_policy.kb_s3_read](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_policy) | resource |
@@ -107,7 +112,7 @@ consumers who never run these tests. See [CONTRIBUTING.md](CONTRIBUTING.md).
 | Name | Description | Type | Default | Required |
 | ---- | ----------- | ---- | ------- | :------: |
 | <a name="input_enable_kbs"></a> [enable\_kbs](#input\_enable\_kbs) | If false, nothing is created. | `bool` | `true` | no |
-| <a name="input_kbs"></a> [kbs](#input\_kbs) | Knowledge Bases definition map. | <pre>map(object({<br/>    kb_name             = string<br/>    role_name           = string<br/>    kb_description      = optional(string)<br/>    embedding_model_arn = string<br/><br/>    # Explicit escape hatch for the compatibility check below (see<br/>    # known_embedding_model_dimensions). Only meaningful for a model this<br/>    # module already recognizes: set to true when the maintained map is<br/>    # stale (AWS expanded the model's valid dimensions, or documentation<br/>    # changed before this module was updated) and you have independently<br/>    # confirmed the pair is valid. Unknown/future models never need this -<br/>    # they already pass automatically since the module cannot validate what<br/>    # it doesn't recognize.<br/>    skip_dimension_validation = optional(bool, false)<br/><br/>    # When true, this module computes (but does not create or attach) an<br/>    # IAM policy document (see output "ingestion_policy_documents")<br/>    # granting the minimal permissions an external actor needs to manage<br/>    # ingestion jobs for this KB: bedrock:StartIngestionJob,<br/>    # GetIngestionJob, ListIngestionJobs, scoped to this KB's own ARN. This<br/>    # module never calls StartIngestionJob itself and never attaches this<br/>    # document to any principal - see "Bedrock / Ingestion Boundary" in the<br/>    # README for why, and for who should use the resulting document.<br/>    expose_ingestion_policy = optional(bool, false)<br/><br/>    # Docs source<br/>    content_bucket = string<br/>    content_prefix = optional(string, "")<br/><br/>    # Chunking strategy for this data source's ingestion. null (default,<br/>    # omitted) sends no vector_ingestion_configuration at all, so AWS<br/>    # applies its own default chunking behavior unchanged from v0.1.0.<br/>    # Exactly the block matching `strategy` may be set (enforced below):<br/>    #   FIXED_SIZE   -> fixed_size<br/>    #   HIERARCHICAL -> hierarchical<br/>    #   SEMANTIC     -> semantic<br/>    #   NONE         -> none of the three<br/>    chunking = optional(object({<br/>      strategy = string<br/><br/>      fixed_size = optional(object({<br/>        max_tokens         = number<br/>        overlap_percentage = number<br/>      }))<br/><br/>      hierarchical = optional(object({<br/>        level_configurations = list(object({<br/>          max_tokens = number<br/>        }))<br/>        overlap_tokens = number<br/>      }))<br/><br/>      semantic = optional(object({<br/>        max_tokens                      = number<br/>        buffer_size                     = number<br/>        breakpoint_percentile_threshold = number<br/>      }))<br/>    }), null)<br/><br/>    # S3 Vectors: either create it, or provide an existing index ARN.<br/>    create_s3vectors          = optional(bool, false)<br/>    s3vectors_bucket_name     = optional(string)<br/>    s3vectors_index_name      = optional(string)<br/>    s3vectors_dimension       = optional(number, 1024)<br/>    s3vectors_distance_metric = optional(string, "cosine")  # cosine|euclidean<br/>    s3vectors_data_type       = optional(string, "float32") # currently float32<br/>    s3vectors_index_arn       = optional(string)            # used when create_s3vectors=false<br/><br/>    # Docs bucket encryption: bring your own KMS key. Default (null) keeps<br/>    # the existing SSE-S3 (AES256) behavior unchanged. Granting this<br/>    # module's IAM policy kms:Decrypt/kms:GenerateDataKey is not, by<br/>    # itself, sufficient - the key's own key policy must also allow the<br/>    # Bedrock execution role (this module does not manage the key or its<br/>    # key policy, since it only accepts an existing key ARN).<br/>    kms_key_arn = optional(string)<br/><br/>    # Docs bucket access logging: bring your own existing logging-destination<br/>    # bucket. Default (null) leaves logging disabled, unchanged from before.<br/>    # This module does not create or configure the destination bucket -<br/>    # it must already be set up to accept S3 access log delivery.<br/>    logging_target_bucket = optional(string)<br/>    logging_target_prefix = optional(string, "")<br/><br/>    # Docs bucket lifecycle: noncurrent object versions are kept forever<br/>    # unless this is set. null (default) = no automatic deletion of old<br/>    # versions, unchanged from before. When set, noncurrent versions older<br/>    # than this many days are expired. This is destructive retention<br/>    # behavior (it permanently deletes old version content, even though it<br/>    # never touches the current/live version) and is therefore<br/>    # consumer-opt-in only, never a default.<br/>    noncurrent_version_expiration_days = optional(number)<br/>  }))</pre> | n/a | yes |
+| <a name="input_kbs"></a> [kbs](#input\_kbs) | Knowledge Bases definition map. | <pre>map(object({<br/>    kb_name             = string<br/>    role_name           = string<br/>    kb_description      = optional(string)<br/>    embedding_model_arn = string<br/><br/>    # Explicit escape hatch for the compatibility check below (see<br/>    # known_embedding_model_dimensions). Only meaningful for a model this<br/>    # module already recognizes: set to true when the maintained map is<br/>    # stale (AWS expanded the model's valid dimensions, or documentation<br/>    # changed before this module was updated) and you have independently<br/>    # confirmed the pair is valid. Unknown/future models never need this -<br/>    # they already pass automatically since the module cannot validate what<br/>    # it doesn't recognize.<br/>    skip_dimension_validation = optional(bool, false)<br/><br/>    # When true, this module computes (but does not create or attach) an<br/>    # IAM policy document (see output "ingestion_policy_documents")<br/>    # granting the minimal permissions an external actor needs to manage<br/>    # ingestion jobs for this KB: bedrock:StartIngestionJob,<br/>    # GetIngestionJob, ListIngestionJobs, scoped to this KB's own ARN. This<br/>    # module never calls StartIngestionJob itself and never attaches this<br/>    # document to any principal - see "Bedrock / Ingestion Boundary" in the<br/>    # README for why, and for who should use the resulting document.<br/>    expose_ingestion_policy = optional(bool, false)<br/><br/>    # When set, this module creates an AWS Logs vended-log delivery pipe<br/>    # (aws_cloudwatch_log_delivery_source + aws_cloudwatch_log_delivery) for<br/>    # this KB's APPLICATION_LOGS (ingestion/document-status events), sending<br/>    # them to an EXISTING delivery destination the caller already owns. This<br/>    # module never creates the destination (CloudWatch Logs, S3, or Data<br/>    # Firehose) or an aws_cloudwatch_log_delivery_destination resource -<br/>    # only the source and the source-to-destination link. Default null<br/>    # (omitted) creates neither resource. See the README's "Ingestion Log<br/>    # Delivery" section.<br/>    ingestion_logging = optional(object({<br/>      delivery_destination_arn = string<br/>    }))<br/><br/>    # Docs source<br/>    content_bucket = string<br/>    content_prefix = optional(string, "")<br/><br/>    # Chunking strategy for this data source's ingestion. null (default,<br/>    # omitted) sends no vector_ingestion_configuration at all, so AWS<br/>    # applies its own default chunking behavior unchanged from v0.1.0.<br/>    # Exactly the block matching `strategy` may be set (enforced below):<br/>    #   FIXED_SIZE   -> fixed_size<br/>    #   HIERARCHICAL -> hierarchical<br/>    #   SEMANTIC     -> semantic<br/>    #   NONE         -> none of the three<br/>    chunking = optional(object({<br/>      strategy = string<br/><br/>      fixed_size = optional(object({<br/>        max_tokens         = number<br/>        overlap_percentage = number<br/>      }))<br/><br/>      hierarchical = optional(object({<br/>        level_configurations = list(object({<br/>          max_tokens = number<br/>        }))<br/>        overlap_tokens = number<br/>      }))<br/><br/>      semantic = optional(object({<br/>        max_tokens                      = number<br/>        buffer_size                     = number<br/>        breakpoint_percentile_threshold = number<br/>      }))<br/>    }), null)<br/><br/>    # S3 Vectors: either create it, or provide an existing index ARN.<br/>    create_s3vectors          = optional(bool, false)<br/>    s3vectors_bucket_name     = optional(string)<br/>    s3vectors_index_name      = optional(string)<br/>    s3vectors_dimension       = optional(number, 1024)<br/>    s3vectors_distance_metric = optional(string, "cosine")  # cosine|euclidean<br/>    s3vectors_data_type       = optional(string, "float32") # currently float32<br/>    s3vectors_index_arn       = optional(string)            # used when create_s3vectors=false<br/><br/>    # Docs bucket encryption: bring your own KMS key. Default (null) keeps<br/>    # the existing SSE-S3 (AES256) behavior unchanged. Granting this<br/>    # module's IAM policy kms:Decrypt/kms:GenerateDataKey is not, by<br/>    # itself, sufficient - the key's own key policy must also allow the<br/>    # Bedrock execution role (this module does not manage the key or its<br/>    # key policy, since it only accepts an existing key ARN).<br/>    kms_key_arn = optional(string)<br/><br/>    # Docs bucket access logging: bring your own existing logging-destination<br/>    # bucket. Default (null) leaves logging disabled, unchanged from before.<br/>    # This module does not create or configure the destination bucket -<br/>    # it must already be set up to accept S3 access log delivery.<br/>    logging_target_bucket = optional(string)<br/>    logging_target_prefix = optional(string, "")<br/><br/>    # Docs bucket lifecycle: noncurrent object versions are kept forever<br/>    # unless this is set. null (default) = no automatic deletion of old<br/>    # versions, unchanged from before. When set, noncurrent versions older<br/>    # than this many days are expired. This is destructive retention<br/>    # behavior (it permanently deletes old version content, even though it<br/>    # never touches the current/live version) and is therefore<br/>    # consumer-opt-in only, never a default.<br/>    noncurrent_version_expiration_days = optional(number)<br/>  }))</pre> | n/a | yes |
 | <a name="input_tags"></a> [tags](#input\_tags) | Extra tags. | `map(string)` | `{}` | no |
 
 ## Outputs
@@ -117,6 +122,8 @@ consumers who never run these tests. See [CONTRIBUTING.md](CONTRIBUTING.md).
 | <a name="output_data_source_ids"></a> [data\_source\_ids](#output\_data\_source\_ids) | Bedrock data source IDs by kbs key. Combined with knowledge\_base\_ids, this gives an external actor everything StartIngestionJob's required knowledgeBaseId/dataSourceId path parameters need - this module does not call StartIngestionJob itself (see the README's "Bedrock / Ingestion Boundary" section); it only exposes the identifiers that workflow requires. |
 | <a name="output_data_source_statuses"></a> [data\_source\_statuses](#output\_data\_source\_statuses) | Bedrock data source status by key (AVAILABLE, DELETING, DELETE\_UNSUCCESSFUL, CREATING, UPDATING, or FAILED). Reflects the most recently refreshed Terraform state, the same point-in-time caveat as knowledge\_base\_statuses applies - not continuous monitoring, polling, or a real-time health check. |
 | <a name="output_iam_role_arns"></a> [iam\_role\_arns](#output\_iam\_role\_arns) | IAM Role ARNs used by each KB. |
+| <a name="output_ingestion_log_delivery_arns"></a> [ingestion\_log\_delivery\_arns](#output\_ingestion\_log\_delivery\_arns) | ARNs of the aws\_cloudwatch\_log\_delivery resources (the source-to-destination link) created for this KB's ingestion log delivery, keyed by kbs entry. Only present for entries with ingestion\_logging set. |
+| <a name="output_ingestion_log_delivery_source_arns"></a> [ingestion\_log\_delivery\_source\_arns](#output\_ingestion\_log\_delivery\_source\_arns) | ARNs of the aws\_cloudwatch\_log\_delivery\_source resources created for this KB's APPLICATION\_LOGS (ingestion/document-status events), keyed by kbs entry. Only present for entries with ingestion\_logging set. This module never creates the delivery destination - see the README's "Ingestion Log Delivery" section. |
 | <a name="output_ingestion_policy_documents"></a> [ingestion\_policy\_documents](#output\_ingestion\_policy\_documents) | IAM policy documents (JSON), keyed by kbs entry, granting the minimal permissions (bedrock:StartIngestionJob, GetIngestionJob, ListIngestionJobs) an external actor needs to manage ingestion for that KB, scoped to its ARN. Only present for kbs entries with expose\_ingestion\_policy = true; this module does not create or attach any IAM resource from this document itself - attach it (as a managed or inline policy) to whatever principal is responsible for triggering and monitoring ingestion. See the README's "Bedrock / Ingestion Boundary" section. |
 | <a name="output_knowledge_base_arns"></a> [knowledge\_base\_arns](#output\_knowledge\_base\_arns) | Bedrock Knowledge Base ARNs by key (when available in awscc). |
 | <a name="output_knowledge_base_ids"></a> [knowledge\_base\_ids](#output\_knowledge\_base\_ids) | Bedrock Knowledge Base IDs by key. |
@@ -501,6 +508,123 @@ What this does and does not do:
 - **Never includes** `bedrock:*`, `s3:*`, `kms:*`, or any other wildcard
   action, regardless of whether the KB uses KMS, chunking, or anything
   else configured elsewhere in that same `kbs` entry.
+
+## Ingestion Log Delivery
+
+Amazon Bedrock Knowledge Bases can deliver `APPLICATION_LOGS` (per-document
+ingestion status events - embedding started/completed/failed, indexing
+started/completed/failed, and similar) through AWS's generic CloudWatch
+Logs vended-log-delivery framework. This is infrastructure *configuration*,
+not ingestion monitoring itself: **Terraform is not polling or watching
+ingestion jobs here** - it is provisioning the pipe logs would flow
+through, if and when an ingestion job runs (see "Bedrock / Ingestion
+Boundary" above for the boundary on triggering/monitoring ingestion
+itself). This is a distinct concept from the "Operational Status Outputs"
+below: those reflect Terraform's own refresh-time state of the KB/data
+source resources; `APPLICATION_LOGS` are operational ingestion/document
+events delivered externally, by AWS, outside Terraform's state entirely.
+
+**Ownership boundary:** this module creates exactly two resources per
+opted-in `kbs` entry:
+- `aws_cloudwatch_log_delivery_source` - registers the KB itself (by its
+  real `knowledge_base_arn`) as a source of `APPLICATION_LOGS`.
+- `aws_cloudwatch_log_delivery` - links that source to a destination.
+
+This module **never creates** the delivery destination - no
+`aws_cloudwatch_log_delivery_destination`, no CloudWatch Logs log group, no
+S3 bucket, no Data Firehose stream, and no destination policy. You supply
+an **existing** destination's ARN; AWS itself requires that destination to
+already exist (it is never auto-provisioned), so there is nothing for this
+module to bootstrap even if it wanted to.
+
+**Delivery source naming:** the delivery source is named deterministically
+as `"${kb_name}-ingestion-logs"` - no random suffix. `PutDeliverySource`
+requires this name to be 1-60 characters, matching `[\w-]*` (letters,
+digits, underscore, hyphen), and unique across all delivery sources in
+your account/region. This module validates the derived name's length at
+`terraform plan` time when `ingestion_logging` is set (`kb_name` itself has
+no length limit of its own beyond AWS's 100-character KB name limit, so a
+long `kb_name` plus the `-ingestion-logs` suffix can exceed 60 characters -
+shorten `kb_name` for that entry if this happens). A charset check exists
+too, but is effectively unreachable in practice: `kb_name` itself is
+already constrained by `awscc_bedrock_knowledge_base`'s own name pattern
+(`^([0-9a-zA-Z][_-]?){1,100}$`), whose character set is always a subset of
+`[\w-]*` - there is no `kb_name` value the KB resource itself would accept
+that could fail this derived-name check on character content alone.
+
+```hcl
+kbs = {
+  default = {
+    # ...required fields as above...
+
+    ingestion_logging = {
+      delivery_destination_arn = "arn:aws:logs:us-east-1:123456789012:delivery-destination:my-existing-destination"
+    }
+  }
+}
+```
+
+Omitting `ingestion_logging` (the default) creates neither resource.
+
+**Destinations**: CloudWatch Logs, S3, and Data Firehose are all supported
+- AWS infers the destination type from the ARN itself, so this module has
+no separate "destination type" field to set. **Same-account only** for
+now; cross-account delivery (which needs a
+`PutDeliveryDestinationPolicy`-configured resource policy on the
+destination) is not implemented.
+
+**Shared destinations are explicitly supported, with no special
+configuration.** AWS's own API is designed so that multiple delivery
+sources can send to the same delivery destination - two (or more) `kbs`
+entries may intentionally set the identical `delivery_destination_arn`:
+
+```hcl
+kbs = {
+  a = { # ...
+    ingestion_logging = { delivery_destination_arn = "arn:aws:logs:us-east-1:123456789012:delivery-destination:shared" }
+  }
+  b = { # ...
+    ingestion_logging = { delivery_destination_arn = "arn:aws:logs:us-east-1:123456789012:delivery-destination:shared" }
+  }
+}
+```
+This creates two independent `aws_cloudwatch_log_delivery_source`/
+`aws_cloudwatch_log_delivery` pairs (one per KB, as always), both pointing
+at the one destination you already own - no deduplication logic is needed
+or attempted, since the module never owned that shared resource in the
+first place.
+
+`ingestion_log_delivery_source_arns` and `ingestion_log_delivery_arns`
+expose the two created resources' ARNs, keyed by `kbs` entry, for anyone
+building their own auditing/monitoring around this (e.g. calling
+`logs:GetDeliverySource`/`logs:GetDelivery` directly, or referencing these
+ARNs in their own IAM policies).
+
+### Apply-time permissions for ingestion logging
+
+Creating these two resources requires the identity running `terraform
+apply` (not this module's Bedrock execution role, and not a principal this
+module creates) to hold, at minimum:
+
+- `bedrock:AllowVendedLogDeliveryForResource`, scoped to the specific KB
+  ARN - AWS classifies this as a permissions-management action, checked
+  when `PutDeliverySource` names that KB as the source resource.
+- `logs:PutDeliverySource`, `logs:GetDeliverySource`,
+  `logs:DeleteDeliverySource`, scoped to the delivery-source ARN this
+  module will create (`arn:aws:logs:<region>:<account>:delivery-source:<kb_name>-ingestion-logs`).
+- `logs:CreateDelivery`, `logs:GetDelivery`, `logs:DeleteDelivery`, which
+  need the delivery, delivery-destination, *and* delivery-source ARNs
+  together.
+- Whatever permission the destination itself requires to be named in a
+  delivery (e.g. `logs:PutDeliveryDestination` is **not** needed by this
+  module since it never creates a destination, but the destination's own
+  owner may separately need it when *they* set it up).
+
+This module does not grant any of these - they are prerequisites for
+whoever runs `terraform apply`, exactly like the S3/IAM/KMS permissions
+already required to create every other resource in this module. Do not
+attach these to `aws_iam_role.bedrock_kb`; that role is never the caller of
+any of these APIs.
 
 ## Operational Status Outputs
 
