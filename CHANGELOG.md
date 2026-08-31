@@ -7,10 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-08-31
+
+This release declares the public module API - the `kbs[*]` input schema,
+all outputs, and Terraform resource addresses - **stable** for the 1.x
+release line. v1.0.0 is a public-API-stability milestone, not a
+feature-completeness, production-certification, or AWS-certification
+claim: see "Definition of Production-Oriented" in the release
+certification for what "production-oriented" does and does not mean for
+this module. No Guardrails, Agents, automatic ingestion, additional vector
+store backend, new IAM permission, or new infrastructure resource is
+introduced by this release - every change below is fail-fast validation
+and documentation hardening identified during the v1.0.0 readiness review.
+
 ### Added
 
 - Two new `kbs` variable validations closing a real, previously-silent gap
-  ahead of the v1.0.0 API freeze: `kbs[*].kb_name` must produce a derived
+  as part of the v1.0.0 API freeze: `kbs[*].kb_name` must produce a derived
   Bedrock Data Source name (`"${kb_name}-docs"`) that matches
   `AWS::Bedrock::DataSource`'s exact Name pattern
   (`^([0-9a-zA-Z][_-]?){1,100}$` - a repetition-count bound, not a fixed
@@ -34,14 +47,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   covering every `kbs[*]` field confirmed to force replacement of a
   module-managed resource, including two fields not previously documented
   (`embedding_model_arn` and `s3vectors_index_name`/`s3vectors_bucket_name`,
-  both proven to cascade into Knowledge Base and Data Source replacement)
-  and `s3vectors_dimension`/`s3vectors_distance_metric`/`s3vectors_data_type`
-  (proven to replace the vector bucket/index; a further Knowledge
-  Base/Data Source cascade remains conditional and not live-verified, the
-  same distinction already established for `s3vectors_kms_key_arn`, which
-  this entry does not alter). Cross-references the existing "Chunking" and
-  "S3 Vectors Encryption" sections rather than duplicating them. No
-  Terraform behavior changed by this entry - documentation only.
+  each a direct CloudFormation/provider create-only fact for the resource
+  it changes directly, cascading into Knowledge Base and Data Source
+  replacement by ordinary Terraform dependency/ForceNew-propagation
+  reasoning - a distinct, separately-labeled kind of evidence from the
+  direct schema fact itself) and
+  `s3vectors_dimension`/`s3vectors_distance_metric`/`s3vectors_data_type`
+  (a direct create-only fact for the vector bucket/index; a further
+  Knowledge Base/Data Source cascade remains conditional and not
+  live-verified, the same distinction already established for
+  `s3vectors_kms_key_arn`, which this entry does not alter).
+  Cross-references the existing "Chunking" and "S3 Vectors Encryption"
+  sections rather than duplicating them. No Terraform behavior changed by
+  this entry - documentation only.
 
 ## [0.4.0] - 2026-08-31
 
