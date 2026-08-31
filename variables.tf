@@ -60,6 +60,16 @@ variable "kbs" {
     # it doesn't recognize.
     skip_dimension_validation = optional(bool, false)
 
+    # When true, this module computes (but does not create or attach) an
+    # IAM policy document (see output "ingestion_policy_documents")
+    # granting the minimal permissions an external actor needs to manage
+    # ingestion jobs for this KB: bedrock:StartIngestionJob,
+    # GetIngestionJob, ListIngestionJobs, scoped to this KB's own ARN. This
+    # module never calls StartIngestionJob itself and never attaches this
+    # document to any principal - see "Bedrock / Ingestion Boundary" in the
+    # README for why, and for who should use the resulting document.
+    expose_ingestion_policy = optional(bool, false)
+
     # Docs source
     content_bucket = string
     content_prefix = optional(string, "")

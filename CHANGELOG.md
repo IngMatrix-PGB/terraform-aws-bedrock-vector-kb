@@ -37,6 +37,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   (must pass, not crash), the `skip_dimension_validation` escape hatch, a
   v0.1.0-style configuration (regression), multiple independently-validated
   `kbs` entries, and interaction with PR #10's chunking configuration.
+- New optional `expose_ingestion_policy` field (default `false`) on each
+  `kbs` entry, and a new `ingestion_policy_documents` output. When set,
+  computes (as a plain `jsonencode()` value - no resource, no AWS API call)
+  an IAM policy document granting exactly `bedrock:StartIngestionJob`,
+  `bedrock:GetIngestionJob`, and `bedrock:ListIngestionJobs`, scoped to that
+  KB's own ARN. This module does not create, attach, or otherwise manage
+  any IAM resource from this document, and does not add these permissions
+  to its own Bedrock execution role - that role is assumed by the Bedrock
+  service itself and never calls these actions; they are meant for
+  whichever external principal (CI role, application role, Lambda
+  execution role, operator role) actually triggers and monitors ingestion.
+  See the README's "Bedrock / Ingestion Boundary" section, including why
+  the Bedrock execution role was ruled out as a target and why all three
+  actions can only be scoped to the knowledge-base ARN (not a specific data
+  source), per AWS's own IAM Service Authorization Reference.
+- 8 new native `terraform test` cases covering: default (no policy
+  produced), opt-in (exact actions/effect/resource asserted), no wildcard
+  action or resource, two KBs with independently-scoped policies, one KB
+  opted in while a sibling KB is not, a KMS-enabled KB (no extra `kms:*`
+  leaks into the ingestion policy), and interaction with PR #10's chunking
+  and PR #11's model/dimension validation (neither is affected).
 
 ### Changed
 
@@ -46,6 +67,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   input, output, or resource address changes. `skip_dimension_validation`
   defaults to `false`; existing `kbs` entries (v0.1.0 and PR #10) already
   use a known-valid model/dimension pair and are unaffected.
+  `expose_ingestion_policy` defaults to `false`; the new
+  `ingestion_policy_documents` output is an empty map by default. No IAM
+  changes to any existing role or policy.
 
 ### Known Limitations
 
@@ -63,6 +87,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Changing `chunking` does not itself trigger `StartIngestionJob` -
   ingestion remains outside this module's scope (see "Bedrock / Ingestion
   Boundary" in the README).
+- `expose_ingestion_policy`'s resulting policy is scoped to the KB's ARN,
+  not to a specific data source - AWS's IAM Service Authorization Reference
+  does not expose resource-level scoping finer than `knowledge-base` for
+  `StartIngestionJob`/`GetIngestionJob`/`ListIngestionJobs`. This module
+  currently creates one data source per KB, so this has no practical effect
+  today, but a principal granted this policy could start/monitor ingestion
+  for any data source under that KB if more than one ever existed.
 
 ## [0.1.0] - 2026-08-28
 

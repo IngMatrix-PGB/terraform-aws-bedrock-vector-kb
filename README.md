@@ -32,6 +32,9 @@ Only behavior that is actually implemented:
 - Embedding model / vector dimension compatibility validation for
   AWS-documented models, with forward compatibility for unrecognized models
   and an explicit opt-out escape hatch
+- Optional, per-KB IAM policy document (JSON, not created or attached) with
+  the minimal permissions an external actor needs to start and monitor
+  ingestion jobs
 - Bucket versioning
 - S3 Block Public Access enforced on the documents bucket
 - TLS-only access enforced on the documents bucket via a bucket policy
@@ -101,7 +104,7 @@ consumers who never run these tests. See [CONTRIBUTING.md](CONTRIBUTING.md).
 | Name | Description | Type | Default | Required |
 | ---- | ----------- | ---- | ------- | :------: |
 | <a name="input_enable_kbs"></a> [enable\_kbs](#input\_enable\_kbs) | If false, nothing is created. | `bool` | `true` | no |
-| <a name="input_kbs"></a> [kbs](#input\_kbs) | Knowledge Bases definition map. | <pre>map(object({<br/>    kb_name             = string<br/>    role_name           = string<br/>    kb_description      = optional(string)<br/>    embedding_model_arn = string<br/><br/>    # Explicit escape hatch for the compatibility check below (see<br/>    # known_embedding_model_dimensions). Only meaningful for a model this<br/>    # module already recognizes: set to true when the maintained map is<br/>    # stale (AWS expanded the model's valid dimensions, or documentation<br/>    # changed before this module was updated) and you have independently<br/>    # confirmed the pair is valid. Unknown/future models never need this -<br/>    # they already pass automatically since the module cannot validate what<br/>    # it doesn't recognize.<br/>    skip_dimension_validation = optional(bool, false)<br/><br/>    # Docs source<br/>    content_bucket = string<br/>    content_prefix = optional(string, "")<br/><br/>    # Chunking strategy for this data source's ingestion. null (default,<br/>    # omitted) sends no vector_ingestion_configuration at all, so AWS<br/>    # applies its own default chunking behavior unchanged from v0.1.0.<br/>    # Exactly the block matching `strategy` may be set (enforced below):<br/>    #   FIXED_SIZE   -> fixed_size<br/>    #   HIERARCHICAL -> hierarchical<br/>    #   SEMANTIC     -> semantic<br/>    #   NONE         -> none of the three<br/>    chunking = optional(object({<br/>      strategy = string<br/><br/>      fixed_size = optional(object({<br/>        max_tokens         = number<br/>        overlap_percentage = number<br/>      }))<br/><br/>      hierarchical = optional(object({<br/>        level_configurations = list(object({<br/>          max_tokens = number<br/>        }))<br/>        overlap_tokens = number<br/>      }))<br/><br/>      semantic = optional(object({<br/>        max_tokens                      = number<br/>        buffer_size                     = number<br/>        breakpoint_percentile_threshold = number<br/>      }))<br/>    }), null)<br/><br/>    # S3 Vectors: either create it, or provide an existing index ARN.<br/>    create_s3vectors          = optional(bool, false)<br/>    s3vectors_bucket_name     = optional(string)<br/>    s3vectors_index_name      = optional(string)<br/>    s3vectors_dimension       = optional(number, 1024)<br/>    s3vectors_distance_metric = optional(string, "cosine")  # cosine|euclidean<br/>    s3vectors_data_type       = optional(string, "float32") # currently float32<br/>    s3vectors_index_arn       = optional(string)            # used when create_s3vectors=false<br/><br/>    # Docs bucket encryption: bring your own KMS key. Default (null) keeps<br/>    # the existing SSE-S3 (AES256) behavior unchanged. Granting this<br/>    # module's IAM policy kms:Decrypt/kms:GenerateDataKey is not, by<br/>    # itself, sufficient - the key's own key policy must also allow the<br/>    # Bedrock execution role (this module does not manage the key or its<br/>    # key policy, since it only accepts an existing key ARN).<br/>    kms_key_arn = optional(string)<br/><br/>    # Docs bucket access logging: bring your own existing logging-destination<br/>    # bucket. Default (null) leaves logging disabled, unchanged from before.<br/>    # This module does not create or configure the destination bucket -<br/>    # it must already be set up to accept S3 access log delivery.<br/>    logging_target_bucket = optional(string)<br/>    logging_target_prefix = optional(string, "")<br/><br/>    # Docs bucket lifecycle: noncurrent object versions are kept forever<br/>    # unless this is set. null (default) = no automatic deletion of old<br/>    # versions, unchanged from before. When set, noncurrent versions older<br/>    # than this many days are expired. This is destructive retention<br/>    # behavior (it permanently deletes old version content, even though it<br/>    # never touches the current/live version) and is therefore<br/>    # consumer-opt-in only, never a default.<br/>    noncurrent_version_expiration_days = optional(number)<br/>  }))</pre> | n/a | yes |
+| <a name="input_kbs"></a> [kbs](#input\_kbs) | Knowledge Bases definition map. | <pre>map(object({<br/>    kb_name             = string<br/>    role_name           = string<br/>    kb_description      = optional(string)<br/>    embedding_model_arn = string<br/><br/>    # Explicit escape hatch for the compatibility check below (see<br/>    # known_embedding_model_dimensions). Only meaningful for a model this<br/>    # module already recognizes: set to true when the maintained map is<br/>    # stale (AWS expanded the model's valid dimensions, or documentation<br/>    # changed before this module was updated) and you have independently<br/>    # confirmed the pair is valid. Unknown/future models never need this -<br/>    # they already pass automatically since the module cannot validate what<br/>    # it doesn't recognize.<br/>    skip_dimension_validation = optional(bool, false)<br/><br/>    # When true, this module computes (but does not create or attach) an<br/>    # IAM policy document (see output "ingestion_policy_documents")<br/>    # granting the minimal permissions an external actor needs to manage<br/>    # ingestion jobs for this KB: bedrock:StartIngestionJob,<br/>    # GetIngestionJob, ListIngestionJobs, scoped to this KB's own ARN. This<br/>    # module never calls StartIngestionJob itself and never attaches this<br/>    # document to any principal - see "Bedrock / Ingestion Boundary" in the<br/>    # README for why, and for who should use the resulting document.<br/>    expose_ingestion_policy = optional(bool, false)<br/><br/>    # Docs source<br/>    content_bucket = string<br/>    content_prefix = optional(string, "")<br/><br/>    # Chunking strategy for this data source's ingestion. null (default,<br/>    # omitted) sends no vector_ingestion_configuration at all, so AWS<br/>    # applies its own default chunking behavior unchanged from v0.1.0.<br/>    # Exactly the block matching `strategy` may be set (enforced below):<br/>    #   FIXED_SIZE   -> fixed_size<br/>    #   HIERARCHICAL -> hierarchical<br/>    #   SEMANTIC     -> semantic<br/>    #   NONE         -> none of the three<br/>    chunking = optional(object({<br/>      strategy = string<br/><br/>      fixed_size = optional(object({<br/>        max_tokens         = number<br/>        overlap_percentage = number<br/>      }))<br/><br/>      hierarchical = optional(object({<br/>        level_configurations = list(object({<br/>          max_tokens = number<br/>        }))<br/>        overlap_tokens = number<br/>      }))<br/><br/>      semantic = optional(object({<br/>        max_tokens                      = number<br/>        buffer_size                     = number<br/>        breakpoint_percentile_threshold = number<br/>      }))<br/>    }), null)<br/><br/>    # S3 Vectors: either create it, or provide an existing index ARN.<br/>    create_s3vectors          = optional(bool, false)<br/>    s3vectors_bucket_name     = optional(string)<br/>    s3vectors_index_name      = optional(string)<br/>    s3vectors_dimension       = optional(number, 1024)<br/>    s3vectors_distance_metric = optional(string, "cosine")  # cosine|euclidean<br/>    s3vectors_data_type       = optional(string, "float32") # currently float32<br/>    s3vectors_index_arn       = optional(string)            # used when create_s3vectors=false<br/><br/>    # Docs bucket encryption: bring your own KMS key. Default (null) keeps<br/>    # the existing SSE-S3 (AES256) behavior unchanged. Granting this<br/>    # module's IAM policy kms:Decrypt/kms:GenerateDataKey is not, by<br/>    # itself, sufficient - the key's own key policy must also allow the<br/>    # Bedrock execution role (this module does not manage the key or its<br/>    # key policy, since it only accepts an existing key ARN).<br/>    kms_key_arn = optional(string)<br/><br/>    # Docs bucket access logging: bring your own existing logging-destination<br/>    # bucket. Default (null) leaves logging disabled, unchanged from before.<br/>    # This module does not create or configure the destination bucket -<br/>    # it must already be set up to accept S3 access log delivery.<br/>    logging_target_bucket = optional(string)<br/>    logging_target_prefix = optional(string, "")<br/><br/>    # Docs bucket lifecycle: noncurrent object versions are kept forever<br/>    # unless this is set. null (default) = no automatic deletion of old<br/>    # versions, unchanged from before. When set, noncurrent versions older<br/>    # than this many days are expired. This is destructive retention<br/>    # behavior (it permanently deletes old version content, even though it<br/>    # never touches the current/live version) and is therefore<br/>    # consumer-opt-in only, never a default.<br/>    noncurrent_version_expiration_days = optional(number)<br/>  }))</pre> | n/a | yes |
 | <a name="input_tags"></a> [tags](#input\_tags) | Extra tags. | `map(string)` | `{}` | no |
 
 ## Outputs
@@ -109,6 +112,7 @@ consumers who never run these tests. See [CONTRIBUTING.md](CONTRIBUTING.md).
 | Name | Description |
 | ---- | ----------- |
 | <a name="output_iam_role_arns"></a> [iam\_role\_arns](#output\_iam\_role\_arns) | IAM Role ARNs used by each KB. |
+| <a name="output_ingestion_policy_documents"></a> [ingestion\_policy\_documents](#output\_ingestion\_policy\_documents) | IAM policy documents (JSON), keyed by kbs entry, granting the minimal permissions (bedrock:StartIngestionJob, GetIngestionJob, ListIngestionJobs) an external actor needs to manage ingestion for that KB, scoped to its ARN. Only present for kbs entries with expose\_ingestion\_policy = true; this module does not create or attach any IAM resource from this document itself - attach it (as a managed or inline policy) to whatever principal is responsible for triggering and monitoring ingestion. See the README's "Bedrock / Ingestion Boundary" section. |
 | <a name="output_knowledge_base_arns"></a> [knowledge\_base\_arns](#output\_knowledge\_base\_arns) | Bedrock Knowledge Base ARNs by key (when available in awscc). |
 | <a name="output_knowledge_base_ids"></a> [knowledge\_base\_ids](#output\_knowledge\_base\_ids) | Bedrock Knowledge Base IDs by key. |
 | <a name="output_s3vectors_index_arns"></a> [s3vectors\_index\_arns](#output\_s3vectors\_index\_arns) | Resolved S3 Vectors index ARNs by key. |
@@ -382,16 +386,106 @@ capability.
 
 ## Bedrock / Ingestion Boundary
 
-Provisioning the S3 Data Source does **not** mean documents are
-automatically or continuously synchronized into the Knowledge Base. Amazon
-Bedrock requires an explicit ingestion job (`StartIngestionJob`, via the AWS
-Console, CLI, or SDK) to read the S3 documents, generate embeddings, and
-write them into the S3 Vectors index. This module does not trigger,
-schedule, or manage ingestion jobs - starting and monitoring ingestion is an
-operational action outside its scope. This also applies after any chunking
-configuration change: changing `chunking` does not itself run
-`StartIngestionJob` - see "Chunking" above for why such a change also
-replaces the data source resource.
+Terraform provisions Bedrock Knowledge Base **infrastructure** (the
+Knowledge Base, the S3 Vectors store, the documents bucket, the data
+source, IAM). It does **not** run ingestion, and it never will as a
+`terraform apply` side effect - this is a deliberate architectural boundary,
+not a gap this module is working toward closing.
+
+Concretely, none of the following ever trigger ingestion:
+
+- `terraform apply` itself, whether creating or updating any resource.
+- Uploading, modifying, or deleting objects in the documents S3 bucket.
+  Amazon Bedrock does not watch the bucket; nothing observes S3 events.
+- Changing a `kbs` entry's `chunking` configuration. Even though this
+  replaces the underlying data source (see "Chunking" above), the
+  replacement itself does not re-ingest previously-ingested content.
+- Creating the Knowledge Base or the data source for the first time.
+
+`StartIngestionJob` is Bedrock's own imperative, one-shot API action - it
+has no declarative Terraform resource in `hashicorp/aws` or
+`hashicorp/awscc`, and no equivalent CloudFormation resource type exists
+either, so `awscc` cannot gain one either. Every time documents in the
+source bucket are added, modified, or removed, a new ingestion job must be
+started explicitly (console, CLI, or SDK) to pick up the change. This
+module does not use `null_resource`, `local-exec`, `remote-exec`, AWS CLI
+invocations, Lambda, EventBridge, or Step Functions to work around that -
+seemingly working around it would mean silently reintroducing the exact
+imperative-inside-declarative anti-pattern this boundary exists to avoid
+(see "Security Decisions" below for the concurrency/rate-limit reasons this
+is also operationally the wrong place for it).
+
+A typical external ingestion workflow, entirely outside this module and
+outside Terraform's state:
+
+```
+terraform apply                    (provisions/updates KB infrastructure)
+        |
+        v
+upload/update documents in S3       (this module's content_bucket)
+        |
+        v
+StartIngestionJob                   (external actor: CI, app, Lambda, operator)
+        |
+        v
+GetIngestionJob / ListIngestionJobs  (poll until COMPLETE or FAILED)
+        |
+        v
+application retrieval                (Retrieve / RetrieveAndGenerate)
+```
+
+### Optional IAM support for that external workflow
+
+This module can compute (but never creates or attaches) an IAM policy
+document granting exactly the permissions that external workflow's "start
+and monitor" step needs. Set `expose_ingestion_policy = true` on a `kbs`
+entry to populate that entry's key in the `ingestion_policy_documents`
+output:
+
+```hcl
+kbs = {
+  default = {
+    # ...required fields as above...
+    expose_ingestion_policy = true
+  }
+}
+```
+
+What this does and does not do:
+
+- **Creates:** nothing. `expose_ingestion_policy` computes a JSON policy
+  document as a plain Terraform value (`jsonencode(...)`) - no
+  `aws_iam_policy`, no attachment, no AWS API call. Omitting it (the
+  default) leaves the output empty for that entry, exactly as before this
+  field existed.
+- **Does not attach to anything.** In particular, it is **not** added to
+  this module's own Bedrock execution role
+  (`aws_iam_role.bedrock_kb`/`iam_role_arns` output). That role is assumed
+  *by the Bedrock service itself* to do its own internal work once an
+  ingestion job is already running (invoke the embedding model, read S3
+  documents, write to the vector store) - it is never the caller of
+  `StartIngestionJob`, `GetIngestionJob`, or `ListIngestionJobs`. Those
+  actions are called by whatever external principal (a CI role, an
+  application role, a Lambda execution role, an operator's role) actually
+  triggers and monitors ingestion, which this module cannot know and does
+  not try to guess. Attach the resulting document (as a managed or inline
+  policy) to whichever principal that is, in your own Terraform
+  configuration or IAM tooling.
+- **Grants exactly:** `bedrock:StartIngestionJob`, `bedrock:GetIngestionJob`,
+  `bedrock:ListIngestionJobs`, scoped to that KB's own ARN (the real
+  `knowledge_base_arn` attribute, not a hand-constructed string, so it is
+  automatically correct for the deployed partition - `aws`, `aws-us-gov`,
+  or `aws-cn`). Per AWS's IAM Service Authorization Reference for Amazon
+  Bedrock, all three actions support resource-level permissions scoped only
+  to the `knowledge-base` resource type - there is no finer-grained
+  data-source- or ingestion-job-level ARN to scope to instead. This module
+  currently creates exactly one data source per KB, but the scoping
+  limit is AWS's own (any principal granted this policy can start/monitor
+  ingestion for *any* data source under that KB, not a specific one) - not
+  something this module chooses or could narrow further.
+- **Never includes** `bedrock:*`, `s3:*`, `kms:*`, or any other wildcard
+  action, regardless of whether the KB uses KMS, chunking, or anything
+  else configured elsewhere in that same `kbs` entry.
 
 ## Security Decisions
 

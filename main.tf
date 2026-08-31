@@ -67,6 +67,11 @@ locals {
     for k, v in local.enabled_kbs : k => v
     if try(v.logging_target_bucket, null) != null
   }
+
+  kbs_with_ingestion_policy = {
+    for k, v in local.enabled_kbs : k => v
+    if try(v.expose_ingestion_policy, false) == true
+  }
 }
 
 # -----------------------------
@@ -410,6 +415,49 @@ resource "awscc_bedrock_knowledge_base" "this" {
     aws_iam_role_policy_attachment.s3_read,
     aws_iam_role_policy_attachment.s3vectors
   ]
+}
+
+# Optional, per-KB IAM policy DOCUMENT (JSON) for an external actor to manage
+# ingestion jobs - never created or attached by this module. See the README's
+# "Bedrock / Ingestion Boundary" section for the full rationale.
+#
+# Deliberately NOT granted to the Bedrock execution role above
+# (aws_iam_role.bedrock_kb): that role is assumed BY the Bedrock service
+# itself to do its own internal work during an already-started ingestion job
+# (invoke the embedding model, read S3 documents, write to the vector store)
+# - it is never the caller of StartIngestionJob/GetIngestionJob/
+# ListIngestionJobs. Those APIs are called by whatever EXTERNAL principal
+# (CI role, application role, Lambda execution role, human operator role)
+# triggers and monitors ingestion, which this module has no way to know or
+# own. Granting these actions to the service role would be accepted by IAM
+# but would be semantically wrong (a permission that identity never
+# exercises) and would not help the actual caller.
+#
+# Per AWS's own IAM Service Authorization Reference for Amazon Bedrock, all
+# three actions support resource-level permissions scoped ONLY to the
+# knowledge-base resource type (arn:${Partition}:bedrock:${Region}:
+# ${Account}:knowledge-base/${KnowledgeBaseId}) - there is no data-source- or
+# ingestion-job-level ARN to scope to instead, so granting these actions for
+# a KB with more than one data source authorizes ingestion for any of that
+# KB's data sources, not just one. This module currently creates exactly one
+# data source per KB, but the IAM scoping limitation is AWS's, not this
+# module's, and is documented as such in the README.
+locals {
+  ingestion_policy_documents = {
+    for k, v in local.kbs_with_ingestion_policy : k => jsonencode({
+      Version = "2012-10-17"
+      Statement = [{
+        Sid    = "BedrockIngestionJobManagement"
+        Effect = "Allow"
+        Action = [
+          "bedrock:StartIngestionJob",
+          "bedrock:GetIngestionJob",
+          "bedrock:ListIngestionJobs",
+        ]
+        Resource = awscc_bedrock_knowledge_base.this[k].knowledge_base_arn
+      }]
+    })
+  }
 }
 
 resource "awscc_bedrock_data_source" "s3" {
