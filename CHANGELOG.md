@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-31
+
 ### Added
 
 - New optional `s3vectors_kms_key_arn` field on each `kbs` entry
