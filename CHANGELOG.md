@@ -7,6 +7,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- New optional `s3vectors_kms_key_arn` field on each `kbs` entry
+  (bring-your-own KMS key, default `null`). Only applies when
+  `create_s3vectors = true`. When set, this module creates an
+  `encryption_configuration` block (`sse_type = "aws:kms"`,
+  `kms_key_arn = <supplied ARN>`) on **both** the module-created
+  `aws_s3vectors_vector_bucket` and `aws_s3vectors_index` explicitly - not
+  relying on the index's own encryption inheriting from the bucket, since
+  AWS's console documentation and the `aws` provider's own resource
+  documentation for the vector index do not fully agree on whether that
+  inheritance is the default when the index's `encryption_configuration`
+  is omitted. This is an independent security boundary from the existing
+  `kms_key_arn` (documents bucket) - the two may use different keys, and
+  setting one never requires or implies setting the other.
+- New, separate IAM policy (`aws_iam_policy.s3vectors_kms` +
+  `aws_iam_role_policy_attachment.s3vectors_kms`) granting the Bedrock
+  execution role `kms:Decrypt` only, scoped to exactly the supplied
+  `s3vectors_kms_key_arn`, only when it is set. Deliberately does **not**
+  include `kms:GenerateDataKey` (unlike the existing docs-bucket KMS
+  policy): AWS's own S3 Vectors encryption documentation names only
+  `kms:Decrypt` as the permission IAM principals need, and the AWS IAM
+  Service Authorization Reference for `s3vectors` shows no KMS-related
+  condition key or dependency on any of the S3 Vectors data-plane actions
+  (`PutVectors`/`GetVectors`/`QueryVectors`/`DeleteVectors`/`GetIndex`/
+  `ListVectors`) - only `CreateVectorBucket`/`CreateIndex` reference KMS at
+  all, and only as IAM condition keys restricting what may be specified at
+  creation, not as evidence of a runtime permission requirement. As with
+  the existing docs-bucket KMS grant, this identity-policy grant is
+  necessary but not sufficient on its own - the external key's own key
+  policy must separately allow the Bedrock execution role.
+- 15 new native `terraform test` cases covering: default (zero encryption
+  resources/policies), exact `encryption_configuration`/`kms_key_arn`/
+  `sse_type` wiring on both the vector bucket and index, multiple KBs with
+  independent keys, two KBs intentionally sharing one key, `enable_kbs =
+  false`, independence from the existing docs-bucket `kms_key_arn` in both
+  directions, interaction with chunking/`ingestion_logging`/
+  `expose_ingestion_policy` (including a regression proving no `kms:*`
+  action leaks into `ingestion_policy_documents`), operational-outputs
+  regression, empty/whitespace `s3vectors_kms_key_arn` (hard validation
+  failure), exact IAM action/effect/policy-separation assertions, and a
+  v0.3.0-style configuration regression.
+
+### Security
+
+- **Replacement risk**: AWS documents S3 Vectors encryption settings as
+  unable to change after the vector bucket/index is created. Setting
+  `s3vectors_kms_key_arn` on an existing, unencrypted `kbs` entry
+  (`create_s3vectors = true`) will force Terraform to replace both
+  `aws_s3vectors_vector_bucket` and `aws_s3vectors_index` (proven),
+  destroying all existing vectors; re-ingestion (external to this module)
+  is required afterward. A further Knowledge Base/Data Source replacement
+  cascade is also possible, since the Knowledge Base's
+  `storage_configuration` is a CloudFormation create-only property, but
+  this has not yet been verified against a live AWS plan. See the
+  README's "S3 Vectors Encryption" section for the full warning.
+
 ## [0.3.0] - 2026-08-31
 
 ### Added

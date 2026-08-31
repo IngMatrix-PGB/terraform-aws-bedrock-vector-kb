@@ -21,6 +21,22 @@ resource "aws_s3vectors_vector_bucket" "this" {
 
   vector_bucket_name = each.value.s3vectors_bucket_name
 
+  # Set explicitly on both the bucket and the index below (rather than
+  # relying on the index's own "use bucket settings" inheritance option)
+  # because this module found the Terraform provider's own documentation
+  # for aws_s3vectors_index describing its encryption_configuration as
+  # defaulting to AES256 when omitted, with no stated inheritance from the
+  # bucket - a signal that doesn't fully agree with the AWS Console
+  # encryption walkthrough page's "use bucket settings for encryption"
+  # option for the index. See the README's "S3 Vectors Encryption" section.
+  dynamic "encryption_configuration" {
+    for_each = try(each.value.s3vectors_kms_key_arn, null) != null ? [1] : []
+    content {
+      sse_type    = "aws:kms"
+      kms_key_arn = each.value.s3vectors_kms_key_arn
+    }
+  }
+
   tags = merge(var.tags, {
     Name    = each.value.s3vectors_bucket_name
     Module  = "bedrock-vector-kb"
@@ -36,6 +52,17 @@ resource "aws_s3vectors_index" "this" {
   data_type          = each.value.s3vectors_data_type
   dimension          = each.value.s3vectors_dimension
   distance_metric    = each.value.s3vectors_distance_metric
+
+  # See the comment on aws_s3vectors_vector_bucket.this above for why this
+  # module sets the same key here explicitly instead of relying on
+  # inheritance from the bucket.
+  dynamic "encryption_configuration" {
+    for_each = try(each.value.s3vectors_kms_key_arn, null) != null ? [1] : []
+    content {
+      sse_type    = "aws:kms"
+      kms_key_arn = each.value.s3vectors_kms_key_arn
+    }
+  }
 
   tags = merge(var.tags, {
     Name    = each.value.s3vectors_index_name
@@ -61,6 +88,16 @@ locals {
   kbs_with_kms = {
     for k, v in local.enabled_kbs : k => v
     if try(v.kms_key_arn, null) != null
+  }
+
+  # S3 Vectors KMS: only for entries this module actually creates the vector
+  # bucket/index for (create_s3vectors = true) - an externally-provided
+  # s3vectors_index_arn's encryption state is outside this module's
+  # knowledge or control, so s3vectors_kms_key_arn has no effect there. See
+  # the README's "S3 Vectors Encryption" section.
+  kbs_with_s3vectors_kms = {
+    for k, v in local.create_vectors : k => v
+    if try(v.s3vectors_kms_key_arn, null) != null
   }
 
   kbs_with_logging = {
@@ -339,6 +376,49 @@ resource "aws_iam_role_policy_attachment" "s3_kms" {
   for_each   = local.kbs_with_kms
   role       = aws_iam_role.bedrock_kb[each.key].name
   policy_arn = aws_iam_policy.kb_s3_kms[each.key].arn
+}
+
+# Only created when the caller opts into S3 Vectors SSE-KMS via
+# s3vectors_kms_key_arn. Deliberately a SEPARATE policy/boundary from
+# kb_s3_kms above (docs bucket KMS) - the two encrypt independent
+# resources and may use different keys; granting one must never imply or
+# require the other.
+#
+# Scoped to kms:Decrypt ONLY, not kms:GenerateDataKey. This is a
+# deliberate, evidence-based departure from kb_s3_kms's action set above:
+# AWS's own S3 Vectors encryption documentation states only
+# "kms:Decrypt" as the permission IAM principals need to access an
+# S3-Vectors-KMS-encrypted bucket/index
+# (https://docs.aws.amazon.com/AmazonS3/latest/userguide/s3-vectors-sectting-encryption.html);
+# the AWS Service Authorization Reference for s3vectors additionally shows
+# no KMS-related condition key or dependency on any of PutVectors/
+# GetVectors/QueryVectors/DeleteVectors/GetIndex/ListVectors - only
+# CreateVectorBucket/CreateIndex list s3vectors:kmsKeyArn/s3vectors:sseType,
+# and only as IAM condition keys restricting what may be specified at
+# creation, not as evidence of a runtime KMS permission requirement. This
+# module does not add kms:GenerateDataKey (or kms:Encrypt/CreateGrant/
+# DescribeKey) without AWS documentation naming it as necessary - see the
+# README's "S3 Vectors Encryption" section for the residual ambiguity this
+# leaves around the write path specifically.
+resource "aws_iam_policy" "s3vectors_kms" {
+  for_each = local.kbs_with_s3vectors_kms
+  name     = "${each.value.role_name}-s3vectors-kms"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid      = "S3VectorsKmsAccess"
+      Effect   = "Allow"
+      Action   = ["kms:Decrypt"]
+      Resource = each.value.s3vectors_kms_key_arn
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "s3vectors_kms" {
+  for_each   = local.kbs_with_s3vectors_kms
+  role       = aws_iam_role.bedrock_kb[each.key].name
+  policy_arn = aws_iam_policy.s3vectors_kms[each.key].arn
 }
 
 # Deliberately NOT added to awscc_bedrock_knowledge_base/data_source's

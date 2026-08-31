@@ -126,6 +126,23 @@ variable "kbs" {
     s3vectors_data_type       = optional(string, "float32") # currently float32
     s3vectors_index_arn       = optional(string)            # used when create_s3vectors=false
 
+    # S3 Vectors encryption: bring your own KMS key. Default (null) keeps
+    # AWS's own default encryption unchanged. Only applies when
+    # create_s3vectors = true - this module does not know the encryption
+    # state of an externally-provided s3vectors_index_arn, and cannot
+    # configure encryption on a resource it does not create. Applied
+    # identically to both the vector bucket and its index (see README's
+    # "S3 Vectors Encryption" section for why this module sets it on both
+    # explicitly rather than relying on the vector index's own encryption
+    # inheritance from its bucket). This is a SEPARATE security boundary
+    # from the docs bucket's kms_key_arn below - the two may use different
+    # keys, and setting this one does not require or imply setting that
+    # one. AWS documents S3 Vectors encryption settings as unable to change
+    # after the vector bucket/index is created - see "S3 Vectors Encryption"
+    # for the resulting replacement/data-loss risk if set on an existing
+    # kbs entry.
+    s3vectors_kms_key_arn = optional(string)
+
     # Docs bucket encryption: bring your own KMS key. Default (null) keeps
     # the existing SSE-S3 (AES256) behavior unchanged. Granting this
     # module's IAM policy kms:Decrypt/kms:GenerateDataKey is not, by
@@ -168,6 +185,15 @@ variable "kbs" {
       )
     ])
     error_message = "kms_key_arn, when provided, must not be empty or whitespace-only."
+  }
+
+  validation {
+    condition = alltrue([
+      for k, v in var.kbs : (
+        try(v.s3vectors_kms_key_arn, null) == null || trimspace(v.s3vectors_kms_key_arn) != ""
+      )
+    ])
+    error_message = "s3vectors_kms_key_arn, when provided, must not be empty or whitespace-only."
   }
 
   validation {

@@ -197,11 +197,13 @@ consumers who never run these tests. See [CONTRIBUTING.md](CONTRIBUTING.md).
 | [aws_iam_policy.kb_s3_kms](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_policy) | resource |
 | [aws_iam_policy.kb_s3_read](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_policy) | resource |
 | [aws_iam_policy.s3vectors](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_policy) | resource |
+| [aws_iam_policy.s3vectors_kms](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_policy) | resource |
 | [aws_iam_role.bedrock_kb](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
 | [aws_iam_role_policy_attachment.invoke_model](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
 | [aws_iam_role_policy_attachment.s3_kms](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
 | [aws_iam_role_policy_attachment.s3_read](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
 | [aws_iam_role_policy_attachment.s3vectors](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
+| [aws_iam_role_policy_attachment.s3vectors_kms](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
 | [aws_s3_bucket.kb_docs](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket) | resource |
 | [aws_s3_bucket_lifecycle_configuration.kb_docs](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_lifecycle_configuration) | resource |
 | [aws_s3_bucket_logging.kb_docs](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_logging) | resource |
@@ -219,7 +221,7 @@ consumers who never run these tests. See [CONTRIBUTING.md](CONTRIBUTING.md).
 | Name | Description | Type | Default | Required |
 | ---- | ----------- | ---- | ------- | :------: |
 | <a name="input_enable_kbs"></a> [enable\_kbs](#input\_enable\_kbs) | If false, nothing is created. | `bool` | `true` | no |
-| <a name="input_kbs"></a> [kbs](#input\_kbs) | Knowledge Bases definition map. | <pre>map(object({<br/>    kb_name             = string<br/>    role_name           = string<br/>    kb_description      = optional(string)<br/>    embedding_model_arn = string<br/><br/>    # Explicit escape hatch for the compatibility check below (see<br/>    # known_embedding_model_dimensions). Only meaningful for a model this<br/>    # module already recognizes: set to true when the maintained map is<br/>    # stale (AWS expanded the model's valid dimensions, or documentation<br/>    # changed before this module was updated) and you have independently<br/>    # confirmed the pair is valid. Unknown/future models never need this -<br/>    # they already pass automatically since the module cannot validate what<br/>    # it doesn't recognize.<br/>    skip_dimension_validation = optional(bool, false)<br/><br/>    # When true, this module computes (but does not create or attach) an<br/>    # IAM policy document (see output "ingestion_policy_documents")<br/>    # granting the minimal permissions an external actor needs to manage<br/>    # ingestion jobs for this KB: bedrock:StartIngestionJob,<br/>    # GetIngestionJob, ListIngestionJobs, scoped to this KB's own ARN. This<br/>    # module never calls StartIngestionJob itself and never attaches this<br/>    # document to any principal - see "Bedrock / Ingestion Boundary" in the<br/>    # README for why, and for who should use the resulting document.<br/>    expose_ingestion_policy = optional(bool, false)<br/><br/>    # When set, this module creates an AWS Logs vended-log delivery pipe<br/>    # (aws_cloudwatch_log_delivery_source + aws_cloudwatch_log_delivery) for<br/>    # this KB's APPLICATION_LOGS (ingestion/document-status events), sending<br/>    # them to an EXISTING delivery destination the caller already owns. This<br/>    # module never creates the destination (CloudWatch Logs, S3, or Data<br/>    # Firehose) or an aws_cloudwatch_log_delivery_destination resource -<br/>    # only the source and the source-to-destination link. Default null<br/>    # (omitted) creates neither resource. See the README's "Ingestion Log<br/>    # Delivery" section.<br/>    ingestion_logging = optional(object({<br/>      delivery_destination_arn = string<br/>    }))<br/><br/>    # Docs source<br/>    content_bucket = string<br/>    content_prefix = optional(string, "")<br/><br/>    # Chunking strategy for this data source's ingestion. null (default,<br/>    # omitted) sends no vector_ingestion_configuration at all, so AWS<br/>    # applies its own default chunking behavior unchanged from v0.1.0.<br/>    # Exactly the block matching `strategy` may be set (enforced below):<br/>    #   FIXED_SIZE   -> fixed_size<br/>    #   HIERARCHICAL -> hierarchical<br/>    #   SEMANTIC     -> semantic<br/>    #   NONE         -> none of the three<br/>    chunking = optional(object({<br/>      strategy = string<br/><br/>      fixed_size = optional(object({<br/>        max_tokens         = number<br/>        overlap_percentage = number<br/>      }))<br/><br/>      hierarchical = optional(object({<br/>        level_configurations = list(object({<br/>          max_tokens = number<br/>        }))<br/>        overlap_tokens = number<br/>      }))<br/><br/>      semantic = optional(object({<br/>        max_tokens                      = number<br/>        buffer_size                     = number<br/>        breakpoint_percentile_threshold = number<br/>      }))<br/>    }), null)<br/><br/>    # S3 Vectors: either create it, or provide an existing index ARN.<br/>    create_s3vectors          = optional(bool, false)<br/>    s3vectors_bucket_name     = optional(string)<br/>    s3vectors_index_name      = optional(string)<br/>    s3vectors_dimension       = optional(number, 1024)<br/>    s3vectors_distance_metric = optional(string, "cosine")  # cosine|euclidean<br/>    s3vectors_data_type       = optional(string, "float32") # currently float32<br/>    s3vectors_index_arn       = optional(string)            # used when create_s3vectors=false<br/><br/>    # Docs bucket encryption: bring your own KMS key. Default (null) keeps<br/>    # the existing SSE-S3 (AES256) behavior unchanged. Granting this<br/>    # module's IAM policy kms:Decrypt/kms:GenerateDataKey is not, by<br/>    # itself, sufficient - the key's own key policy must also allow the<br/>    # Bedrock execution role (this module does not manage the key or its<br/>    # key policy, since it only accepts an existing key ARN).<br/>    kms_key_arn = optional(string)<br/><br/>    # Docs bucket access logging: bring your own existing logging-destination<br/>    # bucket. Default (null) leaves logging disabled, unchanged from before.<br/>    # This module does not create or configure the destination bucket -<br/>    # it must already be set up to accept S3 access log delivery.<br/>    logging_target_bucket = optional(string)<br/>    logging_target_prefix = optional(string, "")<br/><br/>    # Docs bucket lifecycle: noncurrent object versions are kept forever<br/>    # unless this is set. null (default) = no automatic deletion of old<br/>    # versions, unchanged from before. When set, noncurrent versions older<br/>    # than this many days are expired. This is destructive retention<br/>    # behavior (it permanently deletes old version content, even though it<br/>    # never touches the current/live version) and is therefore<br/>    # consumer-opt-in only, never a default.<br/>    noncurrent_version_expiration_days = optional(number)<br/>  }))</pre> | n/a | yes |
+| <a name="input_kbs"></a> [kbs](#input\_kbs) | Knowledge Bases definition map. | <pre>map(object({<br/>    kb_name             = string<br/>    role_name           = string<br/>    kb_description      = optional(string)<br/>    embedding_model_arn = string<br/><br/>    # Explicit escape hatch for the compatibility check below (see<br/>    # known_embedding_model_dimensions). Only meaningful for a model this<br/>    # module already recognizes: set to true when the maintained map is<br/>    # stale (AWS expanded the model's valid dimensions, or documentation<br/>    # changed before this module was updated) and you have independently<br/>    # confirmed the pair is valid. Unknown/future models never need this -<br/>    # they already pass automatically since the module cannot validate what<br/>    # it doesn't recognize.<br/>    skip_dimension_validation = optional(bool, false)<br/><br/>    # When true, this module computes (but does not create or attach) an<br/>    # IAM policy document (see output "ingestion_policy_documents")<br/>    # granting the minimal permissions an external actor needs to manage<br/>    # ingestion jobs for this KB: bedrock:StartIngestionJob,<br/>    # GetIngestionJob, ListIngestionJobs, scoped to this KB's own ARN. This<br/>    # module never calls StartIngestionJob itself and never attaches this<br/>    # document to any principal - see "Bedrock / Ingestion Boundary" in the<br/>    # README for why, and for who should use the resulting document.<br/>    expose_ingestion_policy = optional(bool, false)<br/><br/>    # When set, this module creates an AWS Logs vended-log delivery pipe<br/>    # (aws_cloudwatch_log_delivery_source + aws_cloudwatch_log_delivery) for<br/>    # this KB's APPLICATION_LOGS (ingestion/document-status events), sending<br/>    # them to an EXISTING delivery destination the caller already owns. This<br/>    # module never creates the destination (CloudWatch Logs, S3, or Data<br/>    # Firehose) or an aws_cloudwatch_log_delivery_destination resource -<br/>    # only the source and the source-to-destination link. Default null<br/>    # (omitted) creates neither resource. See the README's "Ingestion Log<br/>    # Delivery" section.<br/>    ingestion_logging = optional(object({<br/>      delivery_destination_arn = string<br/>    }))<br/><br/>    # Docs source<br/>    content_bucket = string<br/>    content_prefix = optional(string, "")<br/><br/>    # Chunking strategy for this data source's ingestion. null (default,<br/>    # omitted) sends no vector_ingestion_configuration at all, so AWS<br/>    # applies its own default chunking behavior unchanged from v0.1.0.<br/>    # Exactly the block matching `strategy` may be set (enforced below):<br/>    #   FIXED_SIZE   -> fixed_size<br/>    #   HIERARCHICAL -> hierarchical<br/>    #   SEMANTIC     -> semantic<br/>    #   NONE         -> none of the three<br/>    chunking = optional(object({<br/>      strategy = string<br/><br/>      fixed_size = optional(object({<br/>        max_tokens         = number<br/>        overlap_percentage = number<br/>      }))<br/><br/>      hierarchical = optional(object({<br/>        level_configurations = list(object({<br/>          max_tokens = number<br/>        }))<br/>        overlap_tokens = number<br/>      }))<br/><br/>      semantic = optional(object({<br/>        max_tokens                      = number<br/>        buffer_size                     = number<br/>        breakpoint_percentile_threshold = number<br/>      }))<br/>    }), null)<br/><br/>    # S3 Vectors: either create it, or provide an existing index ARN.<br/>    create_s3vectors          = optional(bool, false)<br/>    s3vectors_bucket_name     = optional(string)<br/>    s3vectors_index_name      = optional(string)<br/>    s3vectors_dimension       = optional(number, 1024)<br/>    s3vectors_distance_metric = optional(string, "cosine")  # cosine|euclidean<br/>    s3vectors_data_type       = optional(string, "float32") # currently float32<br/>    s3vectors_index_arn       = optional(string)            # used when create_s3vectors=false<br/><br/>    # S3 Vectors encryption: bring your own KMS key. Default (null) keeps<br/>    # AWS's own default encryption unchanged. Only applies when<br/>    # create_s3vectors = true - this module does not know the encryption<br/>    # state of an externally-provided s3vectors_index_arn, and cannot<br/>    # configure encryption on a resource it does not create. Applied<br/>    # identically to both the vector bucket and its index (see README's<br/>    # "S3 Vectors Encryption" section for why this module sets it on both<br/>    # explicitly rather than relying on the vector index's own encryption<br/>    # inheritance from its bucket). This is a SEPARATE security boundary<br/>    # from the docs bucket's kms_key_arn below - the two may use different<br/>    # keys, and setting this one does not require or imply setting that<br/>    # one. AWS documents S3 Vectors encryption settings as unable to change<br/>    # after the vector bucket/index is created - see "S3 Vectors Encryption"<br/>    # for the resulting replacement/data-loss risk if set on an existing<br/>    # kbs entry.<br/>    s3vectors_kms_key_arn = optional(string)<br/><br/>    # Docs bucket encryption: bring your own KMS key. Default (null) keeps<br/>    # the existing SSE-S3 (AES256) behavior unchanged. Granting this<br/>    # module's IAM policy kms:Decrypt/kms:GenerateDataKey is not, by<br/>    # itself, sufficient - the key's own key policy must also allow the<br/>    # Bedrock execution role (this module does not manage the key or its<br/>    # key policy, since it only accepts an existing key ARN).<br/>    kms_key_arn = optional(string)<br/><br/>    # Docs bucket access logging: bring your own existing logging-destination<br/>    # bucket. Default (null) leaves logging disabled, unchanged from before.<br/>    # This module does not create or configure the destination bucket -<br/>    # it must already be set up to accept S3 access log delivery.<br/>    logging_target_bucket = optional(string)<br/>    logging_target_prefix = optional(string, "")<br/><br/>    # Docs bucket lifecycle: noncurrent object versions are kept forever<br/>    # unless this is set. null (default) = no automatic deletion of old<br/>    # versions, unchanged from before. When set, noncurrent versions older<br/>    # than this many days are expired. This is destructive retention<br/>    # behavior (it permanently deletes old version content, even though it<br/>    # never touches the current/live version) and is therefore<br/>    # consumer-opt-in only, never a default.<br/>    noncurrent_version_expiration_days = optional(number)<br/>  }))</pre> | n/a | yes |
 | <a name="input_tags"></a> [tags](#input\_tags) | Extra tags. | `map(string)` | `{}` | no |
 
 ## Outputs
@@ -371,6 +373,85 @@ That identity-policy grant is necessary but **not sufficient** on its own -
 the external key's own key policy must separately allow the Bedrock
 execution role. Passing `kms_key_arn` does not, by itself, guarantee
 successful KMS access; the key policy is the consumer's responsibility.
+
+## S3 Vectors Encryption
+
+**Warning: encryption settings cannot be changed after the vector bucket or
+vector index is created.** This is an AWS limitation, not a choice this
+module makes.
+
+**Proven:** setting `s3vectors_kms_key_arn` on a `kbs` entry that already
+has a module-created, unencrypted vector bucket/index (`create_s3vectors =
+true`) will force Terraform to **replace** both
+`aws_s3vectors_vector_bucket` and `aws_s3vectors_index` - destroying and
+recreating them, since `encryption_configuration` is independently
+`Forces new resource` on each. A replaced vector index has **no vectors in
+it** until documents are re-ingested (`StartIngestionJob`, external to this
+module - see "Operational Lifecycle"); this module does not detect, warn
+about, or automate that re-ingestion.
+
+**Conditional, not yet live-verified:** the Knowledge Base's
+`storage_configuration` (which carries the S3 Vectors index ARN) is a
+CloudFormation `createOnlyProperty` on `AWS::Bedrock::KnowledgeBase`.
+Because the Knowledge Base storage configuration is create-only, a change
+in the *effective* S3 Vectors index ARN would also require Knowledge Base
+replacement. With this module's current deterministic index naming (the
+recreated index keeps the same bucket/index names, and S3 Vectors index
+ARNs are name-based, so the ARN string is likely unchanged across the
+replacement), whether Terraform's planner actually treats this as a
+changed value - and therefore plans that additional Knowledge Base
+replacement - has **not yet been verified with a live AWS plan**. If it
+does cascade: the Knowledge Base's `KnowledgeBaseId`/ARN would change,
+external consumers of the `knowledge_base_ids`/`knowledge_base_arns`
+outputs would need to account for that, and the KB's Data Source would
+very likely also require replacement, since a Data Source belongs to a
+specific Knowledge Base ID.
+
+Either way - proven or conditional - re-ingestion is required afterward.
+Plan this change deliberately, on a maintenance window, with re-ingestion
+ready to run immediately after apply - do not treat it as a routine,
+safe-to-apply-anytime input change like most other optional fields in this
+module.
+
+`s3vectors_kms_key_arn` is bring-your-own-key, exactly like the docs
+bucket's `kms_key_arn` above, but it is an **independent security
+boundary**: the two may use different keys, and setting one never requires
+or implies setting the other. Default (`null`, omitted) leaves AWS's own
+default encryption unchanged. Only applies when `create_s3vectors = true` -
+this module has no way to know or change the encryption state of an
+externally-provided `s3vectors_index_arn`.
+
+When set, this module grants the Bedrock execution role **`kms:Decrypt`
+only** (not `kms:GenerateDataKey`, unlike the docs-bucket policy above) on
+exactly that key ARN, as a logically separate IAM policy from the docs
+bucket's KMS policy. This is a deliberate, evidence-based choice, not an
+oversight: AWS's own S3 Vectors encryption documentation explicitly names
+`kms:Decrypt` as the permission IAM principals need to access a
+KMS-encrypted vector bucket/index - no AWS source found names any
+additional action, so none is granted speculatively. That said, this is
+the boundary of what's currently verified: native `terraform test` cases
+validate the IAM/HCL shape only (the policy's action, effect, and
+resource scoping), not live AWS behavior; AWS's documentation does not
+explicitly settle whether the complete Bedrock → S3 Vectors *write* path
+needs anything beyond `kms:Decrypt`. Live AWS integration validation
+remains future work. As with `kms_key_arn`, this identity-policy grant is
+necessary but **not sufficient** on its own - the external key's own key
+policy must separately allow the Bedrock execution role.
+
+This module sets the same `s3vectors_kms_key_arn` explicitly on **both**
+the vector bucket and its index, rather than setting it once on the bucket
+and relying on the index's own encryption inheriting from the bucket. AWS's
+own console documentation for configuring vector index encryption presents
+an explicit "use bucket settings for encryption" choice, suggesting
+inheritance is supported; the `aws` provider's own resource documentation
+for the vector index instead describes its `sse_type` as defaulting to
+`AES256` when its `encryption_configuration` block is omitted, with no
+inheritance language. These two authoritative sources do not fully agree,
+and this module resolves the ambiguity by setting the key explicitly on
+both resources - the one choice that guarantees full encryption of the
+entire S3 Vectors storage stack regardless of how that discrepancy
+resolves, rather than risk an under-encrypted index by assuming
+inheritance.
 
 ## Logging Boundary
 
@@ -875,6 +956,14 @@ does not trigger document re-ingestion**, so it is never the fix by itself:
 
 ## Known Limitations
 
+- **S3 Vectors encryption settings are immutable once set. Retrofitting or
+  changing `s3vectors_kms_key_arn` on an existing `kbs` entry replaces the
+  module-managed vector bucket and index - vector contents are not
+  preserved, and external re-ingestion is required afterward.** A
+  Knowledge Base/Data Source replacement cascade is also possible (AWS's
+  Knowledge Base `storage_configuration` is create-only) but has not yet
+  been verified against a live AWS plan - see "S3 Vectors Encryption"
+  above for the full, precisely-scoped warning.
 - Terraform never calls `StartIngestionJob`, `GetIngestionJob`, or
   `ListIngestionJobs`, and no Terraform resource represents an ingestion
   job at all (none exists in `hashicorp/aws`, `hashicorp/awscc`, or raw
