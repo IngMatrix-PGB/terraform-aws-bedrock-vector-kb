@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Two new `kbs` variable validations closing a real, previously-silent gap
+  ahead of the v1.0.0 API freeze: `kbs[*].kb_name` must produce a derived
+  Bedrock Data Source name (`"${kb_name}-docs"`) that matches
+  `AWS::Bedrock::DataSource`'s exact Name pattern
+  (`^([0-9a-zA-Z][_-]?){1,100}$` - a repetition-count bound, not a fixed
+  raw-character-count limit, since each optional separator lets two raw
+  characters share one repetition), and must not end in `-`/`_` (which
+  would produce an invalid double-separator sequence once the literal
+  `-docs` suffix is appended, independent of length). Both fire
+  unconditionally for every `kbs` entry, since the Data Source name is
+  always derived, not opt-in. Neither restricts `kb_name` in general -
+  only the derived name this module itself constructs.
+- 5 new native `terraform test` cases covering: a 96-character
+  separator-free `kb_name` (the true boundary - passes), a 97-character
+  separator-free `kb_name` (fails), a 149-character `kb_name` using
+  internal separators (still passes, proving no fixed length threshold is
+  correct for every composition), and `kb_name` ending in `-` or `_`
+  (fails).
+
+### Documentation
+
+- New "Replacement / Lifecycle Reference" README section: a compact table
+  covering every `kbs[*]` field confirmed to force replacement of a
+  module-managed resource, including two fields not previously documented
+  (`embedding_model_arn` and `s3vectors_index_name`/`s3vectors_bucket_name`,
+  both proven to cascade into Knowledge Base and Data Source replacement)
+  and `s3vectors_dimension`/`s3vectors_distance_metric`/`s3vectors_data_type`
+  (proven to replace the vector bucket/index; a further Knowledge
+  Base/Data Source cascade remains conditional and not live-verified, the
+  same distinction already established for `s3vectors_kms_key_arn`, which
+  this entry does not alter). Cross-references the existing "Chunking" and
+  "S3 Vectors Encryption" sections rather than duplicating them. No
+  Terraform behavior changed by this entry - documentation only.
+
 ## [0.4.0] - 2026-08-31
 
 ### Added

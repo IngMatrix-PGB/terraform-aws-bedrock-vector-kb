@@ -168,6 +168,66 @@ variable "kbs" {
     noncurrent_version_expiration_days = optional(number)
   }))
 
+  # This module unconditionally derives the Bedrock Data Source's name as
+  # "${kb_name}-docs" (see awscc_bedrock_data_source.s3.name in main.tf) -
+  # unlike the ingestion_logging-derived delivery-source name, this applies
+  # to every enabled kbs entry, not just an opt-in subset.
+  #
+  # AWS::Bedrock::DataSource.Name (per the CloudFormation resource schema)
+  # has ONLY a pattern constraint - ^([0-9a-zA-Z][_-]?){1,100}$ - with no
+  # independent minLength/maxLength anywhere in the schema (confirmed by
+  # inspecting the complete property definition, not just the regex).
+  # Critically, this is a REPETITION-count bound (at most 100 "1
+  # alphanumeric char + 1 optional separator" units), not a raw
+  # character-count bound: verified empirically that a 96-character,
+  # separator-free kb_name produces a 101-character derived name that
+  # STILL matches (the trailing "-docs" hyphen absorbs into kb_name's
+  # final character as its optional separator, costing zero extra
+  # repetitions), while a 97-character version (102 raw characters) does
+  # not. No fixed raw-length threshold is correct for every kb_name
+  # composition - a kb_name containing its own internal separators can
+  # validly exceed either boundary, since each separator lets 2 raw
+  # characters share a single repetition. A prior version of this
+  # validation used a flat length(...) <= 100 check; that was proven
+  # incorrect (it rejected valid, AWS-acceptable configurations) and has
+  # been replaced with a direct match against AWS's own exact pattern,
+  # which is the only representation that is neither too strict nor too
+  # permissive for every possible kb_name composition.
+  #
+  # A second, independent, purely charset-driven failure exists
+  # regardless of length: kb_name is allowed to END in a "-" or "_" under
+  # this exact pattern (a repetition's optional separator is unconstrained
+  # on the final repetition). Appending the literal "-docs" suffix (which
+  # itself starts with "-") to such a kb_name produces two consecutive
+  # separator characters (e.g. kb_name = "my-kb-" -> derived =
+  # "my-kb--docs"), which no valid decomposition of this pattern can
+  # match, at any length. Verified empirically: "my-kb-" is accepted by
+  # this exact regex, but "my-kb--docs" is rejected by it. This case is
+  # kept as its own, separate validation (in addition to being covered by
+  # the general pattern-match check below) purely for a clearer,
+  # more specific error message - it is the single most likely way a
+  # valid kb_name breaks this module's derivation in practice.
+  #
+  # Neither check restricts kb_name's format in general - this module
+  # still does not validate kb_name globally, since AWS's own
+  # CreateKnowledgeBase API is the authority on kb_name's own validity.
+  # Both exist solely because concatenating "-docs" onto kb_name is this
+  # module's own derivation, and only THIS module can catch the resulting
+  # failure before an opaque CloudFormation error at apply time.
+  validation {
+    condition = alltrue([
+      for k, v in var.kbs : can(regex("^([0-9a-zA-Z][_-]?){1,100}$", "${v.kb_name}-docs"))
+    ])
+    error_message = "kbs[*].kb_name produces an invalid Bedrock Data Source name once this module appends its literal \"-docs\" suffix (\"$${kb_name}-docs\" must match AWS::Bedrock::DataSource's exact Name pattern ^([0-9a-zA-Z][_-]?){1,100}$ - at most 100 repetitions of one alphanumeric character optionally followed by one hyphen or underscore). kb_name itself may be a perfectly valid Knowledge Base name; this is specific to the derived name this module constructs. Shorten kb_name, or reduce how many separator characters it uses relative to its length, for the affected entry."
+  }
+
+  validation {
+    condition = alltrue([
+      for k, v in var.kbs : !can(regex("[_-]$", v.kb_name))
+    ])
+    error_message = "kbs[*].kb_name must not end in \"-\" or \"_\" - this module always derives the Bedrock Data Source name by appending the literal \"-docs\" suffix to kb_name, and a kb_name ending in a separator character produces two consecutive separator characters in the derived name (e.g. \"my-kb-\" + \"-docs\" = \"my-kb--docs\"), which AWS::Bedrock::DataSource's Name pattern rejects regardless of length. kb_name itself may otherwise be a perfectly valid Knowledge Base name; only the trailing separator combined with this module's own derivation is the problem."
+  }
+
   validation {
     condition = alltrue([
       for k, v in var.kbs : (
