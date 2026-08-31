@@ -35,6 +35,9 @@ Only behavior that is actually implemented:
 - Optional, per-KB IAM policy document (JSON, not created or attached) with
   the minimal permissions an external actor needs to start and monitor
   ingestion jobs
+- Knowledge Base / data source status outputs and data source ID outputs,
+  reflecting the most recently refreshed Terraform state (not continuous
+  monitoring)
 - Bucket versioning
 - S3 Block Public Access enforced on the documents bucket
 - TLS-only access enforced on the documents bucket via a bucket policy
@@ -111,10 +114,13 @@ consumers who never run these tests. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 | Name | Description |
 | ---- | ----------- |
+| <a name="output_data_source_ids"></a> [data\_source\_ids](#output\_data\_source\_ids) | Bedrock data source IDs by kbs key. Combined with knowledge\_base\_ids, this gives an external actor everything StartIngestionJob's required knowledgeBaseId/dataSourceId path parameters need - this module does not call StartIngestionJob itself (see the README's "Bedrock / Ingestion Boundary" section); it only exposes the identifiers that workflow requires. |
+| <a name="output_data_source_statuses"></a> [data\_source\_statuses](#output\_data\_source\_statuses) | Bedrock data source status by key (AVAILABLE, DELETING, DELETE\_UNSUCCESSFUL, CREATING, UPDATING, or FAILED). Reflects the most recently refreshed Terraform state, the same point-in-time caveat as knowledge\_base\_statuses applies - not continuous monitoring, polling, or a real-time health check. |
 | <a name="output_iam_role_arns"></a> [iam\_role\_arns](#output\_iam\_role\_arns) | IAM Role ARNs used by each KB. |
 | <a name="output_ingestion_policy_documents"></a> [ingestion\_policy\_documents](#output\_ingestion\_policy\_documents) | IAM policy documents (JSON), keyed by kbs entry, granting the minimal permissions (bedrock:StartIngestionJob, GetIngestionJob, ListIngestionJobs) an external actor needs to manage ingestion for that KB, scoped to its ARN. Only present for kbs entries with expose\_ingestion\_policy = true; this module does not create or attach any IAM resource from this document itself - attach it (as a managed or inline policy) to whatever principal is responsible for triggering and monitoring ingestion. See the README's "Bedrock / Ingestion Boundary" section. |
 | <a name="output_knowledge_base_arns"></a> [knowledge\_base\_arns](#output\_knowledge\_base\_arns) | Bedrock Knowledge Base ARNs by key (when available in awscc). |
 | <a name="output_knowledge_base_ids"></a> [knowledge\_base\_ids](#output\_knowledge\_base\_ids) | Bedrock Knowledge Base IDs by key. |
+| <a name="output_knowledge_base_statuses"></a> [knowledge\_base\_statuses](#output\_knowledge\_base\_statuses) | Bedrock Knowledge Base status by key (e.g. ACTIVE, CREATING, UPDATING, FAILED, DELETING, DELETE\_UNSUCCESSFUL, UPDATE\_UNSUCCESSFUL). Reflects the most recently refreshed Terraform state - it is a point-in-time value captured during refresh/plan/apply, not continuous monitoring, polling, or a real-time health check. Re-run terraform plan/apply (or terraform refresh) to get a current value; between runs this output can be stale. |
 | <a name="output_s3vectors_index_arns"></a> [s3vectors\_index\_arns](#output\_s3vectors\_index\_arns) | Resolved S3 Vectors index ARNs by key. |
 <!-- END_TF_DOCS -->
 
@@ -495,6 +501,42 @@ What this does and does not do:
 - **Never includes** `bedrock:*`, `s3:*`, `kms:*`, or any other wildcard
   action, regardless of whether the KB uses KMS, chunking, or anything
   else configured elsewhere in that same `kbs` entry.
+
+## Operational Status Outputs
+
+`knowledge_base_statuses` and `data_source_statuses` expose each resource's
+`status`/`data_source_status` attribute, keyed by `kbs` entry. Both are
+plain computed-attribute passthroughs - no polling, no new IAM, no new AWS
+resource.
+
+**Status outputs reflect the most recently refreshed Terraform state and
+should not be treated as continuous monitoring.** Terraform captures these
+values during `refresh`/`plan`/`apply` - the value can be stale the moment
+the run finishes if the underlying resource's real AWS state changes
+afterward (for example, a Knowledge Base transitioning to `FAILED` between
+one `apply` and the next). Re-run `terraform plan` or `terraform refresh`
+to get a current value. These are not real-time status, not live health,
+and not a substitute for actual monitoring - see "Bedrock / Ingestion
+Boundary" above for what this module deliberately does not do
+(CloudWatch/CloudTrail/EventBridge integration is a separate, future
+concern, not implemented by this output).
+
+Documented status values, per AWS's current API reference (not
+exhaustive-by-omission if AWS adds more later):
+- Knowledge Base (`knowledge_base_statuses`): `CREATING`, `ACTIVE`,
+  `DELETING`, `UPDATING`, `FAILED`, `DELETE_UNSUCCESSFUL`,
+  `UPDATE_UNSUCCESSFUL`.
+- Data source (`data_source_statuses`): `AVAILABLE`, `DELETING`,
+  `DELETE_UNSUCCESSFUL`, `CREATING`, `UPDATING`, `FAILED`.
+
+`data_source_ids` closes an operational gap left open by v0.2.0: an
+external actor calling `StartIngestionJob` (see "Bedrock / Ingestion
+Boundary" above) needs both `knowledgeBaseId` and `dataSourceId` as path
+parameters. `knowledge_base_ids` already provided the former; this module
+had no output for the latter until now. This output does not change the
+ingestion boundary - Terraform still never calls `StartIngestionJob`
+itself - it only gives the external workflow the second identifier that
+workflow already required.
 
 ## Security Decisions
 

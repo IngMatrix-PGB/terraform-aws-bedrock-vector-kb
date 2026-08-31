@@ -8,6 +8,21 @@ output "knowledge_base_arns" {
   value       = { for k, v in awscc_bedrock_knowledge_base.this : k => try(v.knowledge_base_arn, null) }
 }
 
+output "knowledge_base_statuses" {
+  description = "Bedrock Knowledge Base status by key (e.g. ACTIVE, CREATING, UPDATING, FAILED, DELETING, DELETE_UNSUCCESSFUL, UPDATE_UNSUCCESSFUL). Reflects the most recently refreshed Terraform state - it is a point-in-time value captured during refresh/plan/apply, not continuous monitoring, polling, or a real-time health check. Re-run terraform plan/apply (or terraform refresh) to get a current value; between runs this output can be stale."
+  value       = { for k, v in awscc_bedrock_knowledge_base.this : k => try(v.status, null) }
+}
+
+output "data_source_ids" {
+  description = "Bedrock data source IDs by kbs key. Combined with knowledge_base_ids, this gives an external actor everything StartIngestionJob's required knowledgeBaseId/dataSourceId path parameters need - this module does not call StartIngestionJob itself (see the README's \"Bedrock / Ingestion Boundary\" section); it only exposes the identifiers that workflow requires."
+  value       = { for k, v in awscc_bedrock_data_source.s3 : k => v.data_source_id }
+}
+
+output "data_source_statuses" {
+  description = "Bedrock data source status by key (AVAILABLE, DELETING, DELETE_UNSUCCESSFUL, CREATING, UPDATING, or FAILED). Reflects the most recently refreshed Terraform state, the same point-in-time caveat as knowledge_base_statuses applies - not continuous monitoring, polling, or a real-time health check."
+  value       = { for k, v in awscc_bedrock_data_source.s3 : k => try(v.data_source_status, null) }
+}
+
 output "s3vectors_index_arns" {
   description = "Resolved S3 Vectors index ARNs by key."
   value       = local.index_arn_by_kb

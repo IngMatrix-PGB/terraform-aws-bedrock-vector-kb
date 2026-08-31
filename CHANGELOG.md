@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- New outputs `knowledge_base_statuses` and `data_source_statuses`, plain
+  computed-attribute passthroughs (`status`/`data_source_status`) keyed by
+  `kbs` entry. These reflect the most recently refreshed Terraform state
+  only - not continuous monitoring, polling, or a real-time health check.
+  No new resources, no new IAM.
+- New output `data_source_ids`, keyed by `kbs` entry. Closes an operational
+  gap left open since v0.2.0: an external actor calling `StartIngestionJob`
+  needs both `knowledgeBaseId` (already available via `knowledge_base_ids`)
+  and `dataSourceId`, which had no output until now. This does not change
+  the ingestion boundary - Terraform still never calls `StartIngestionJob`.
+- 12 new native `terraform test` cases covering all three new outputs
+  (single KB, multiple independently-keyed KBs, `enable_kbs = false` empty
+  shape), regression coverage proving `knowledge_base_ids`,
+  `knowledge_base_arns`, and `ingestion_policy_documents` are unchanged, and
+  interaction coverage with chunking, model/dimension validation, and
+  `expose_ingestion_policy`.
+
 ## [0.2.0] - 2026-08-30
 
 ### Added
