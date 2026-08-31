@@ -64,6 +64,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   this has not yet been verified against a live AWS plan. See the
   README's "S3 Vectors Encryption" section for the full warning.
 
+### Documentation
+
+- Documented the runtime ownership boundary for Amazon Bedrock Guardrails
+  and Knowledge Bases: a new "Guardrails Integration Boundary" README
+  section explains that Knowledge Base/Data Source resources expose no
+  declarative Guardrail attachment point, where Guardrails are actually
+  configured (`Retrieve`, `RetrieveAndGenerate`, Bedrock Agents), what a
+  Guardrail evaluates versus what it does not, and how a consumer
+  integrates an externally-provisioned Guardrail at runtime. Cross-
+  referenced from the Responsibility Matrix and Known Limitations. No
+  Terraform behavior changed - this entry is documentation only, and no
+  Guardrail support was added.
+
 ## [0.3.0] - 2026-08-31
 
 ### Added
