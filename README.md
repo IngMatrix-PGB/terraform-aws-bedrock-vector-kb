@@ -118,7 +118,16 @@ consumers who never run these tests. See [CONTRIBUTING.md](CONTRIBUTING.md).
 | <a name="output_s3vectors_index_arns"></a> [s3vectors\_index\_arns](#output\_s3vectors\_index\_arns) | Resolved S3 Vectors index ARNs by key. |
 <!-- END_TF_DOCS -->
 
+`knowledge_base_arns` returns each Knowledge Base's real ARN, keyed by `kbs`
+entry. Prior to this fix it referenced a nonexistent provider attribute and
+silently returned `null` for every entry - see the Changelog's `[0.2.0]`
+`### Fixed` entry.
+
 ## Usage
+
+A complete, runnable configuration lives in
+[`examples/basic`](examples/basic/main.tf) - the excerpts below show the
+same module inputs in isolation.
 
 The simplest usable Knowledge Base, creating its own S3 Vectors store:
 
@@ -507,6 +516,33 @@ What this does and does not do:
 These two are architecture/policy decisions for the consumer to make and
 implement outside this module if their environment requires them, not gaps
 this module leaves unaddressed by omission.
+
+## Known Limitations
+
+- Terraform never calls `StartIngestionJob`, `GetIngestionJob`, or
+  `ListIngestionJobs` - see "Bedrock / Ingestion Boundary".
+- No automatic S3 → Knowledge Base synchronization: adding, changing, or
+  removing documents in the content bucket never triggers ingestion on its
+  own.
+- No automatic re-ingestion after a `chunking` change, even though that
+  change replaces the underlying data source - see "Chunking".
+- The embedding model / vector dimension compatibility map
+  (`known_embedding_model_dimensions`) is a static, maintained snapshot by
+  design, not a live query against AWS - see "Embedding Model / Dimension
+  Compatibility".
+- Unknown or future embedding models are allowed through validation
+  unconditionally, by design - this module cannot validate what it doesn't
+  recognize, and would rather stay usable than guess.
+- `ingestion_policy_documents`' IAM scoping stops at the Knowledge Base
+  ARN, not a specific data source, because AWS's IAM Service Authorization
+  Reference does not expose a narrower resource type for
+  `StartIngestionJob`/`GetIngestionJob`/`ListIngestionJobs`.
+- No Guardrails, model evaluation, or advanced observability wiring beyond
+  what's already listed under "Features".
+- No cross-region replication or S3 event notifications for the documents
+  bucket - see "Security Decisions".
+- No built-in support for vector store backends other than Amazon S3
+  Vectors (OpenSearch Serverless, Pinecone, etc.) - see "Architecture".
 
 ## Contributing
 
