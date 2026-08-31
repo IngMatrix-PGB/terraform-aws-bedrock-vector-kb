@@ -5,7 +5,7 @@ output "knowledge_base_ids" {
 
 output "knowledge_base_arns" {
   description = "Bedrock Knowledge Base ARNs by key (when available in awscc)."
-  value       = { for k, v in awscc_bedrock_knowledge_base.this : k => try(v.arn, null) }
+  value       = { for k, v in awscc_bedrock_knowledge_base.this : k => try(v.knowledge_base_arn, null) }
 }
 
 output "s3vectors_index_arns" {

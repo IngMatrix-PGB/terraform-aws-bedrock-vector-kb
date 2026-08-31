@@ -71,6 +71,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `ingestion_policy_documents` output is an empty map by default. No IAM
   changes to any existing role or policy.
 
+### Fixed
+
+- `knowledge_base_arns` now uses the actual `awscc_bedrock_knowledge_base`
+  attribute (`knowledge_base_arn`) instead of a nonexistent `arn` attribute.
+  Every entry previously evaluated to `null` (silently, via `try()`) since
+  v0.1.0; entries now return the Knowledge Base's real ARN. Output name, map
+  keys, and shape are unchanged - this corrects the existing contract's
+  behavior rather than replacing it.
+
 ### Known Limitations
 
 - Changing `chunking` on an existing `kbs` entry - including adding it
