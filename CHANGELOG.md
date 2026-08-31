@@ -66,6 +66,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   AWS's 60-character limit for delivery source names; this module validates
   that at `terraform plan` time rather than letting AWS reject it later.
 
+### Documentation
+
+- Consolidated the operational contract established across PR #14
+  (operational status outputs) and PR #15 (ingestion log delivery) into
+  the README: a new "Operational Lifecycle" section (the complete,
+  numbered sequence from `terraform apply` through document upload,
+  external `StartIngestionJob`, `APPLICATION_LOGS` delivery, and runtime
+  retrieval, plus a consolidated flow diagram replacing the smaller
+  duplicate one previously in "Bedrock / Ingestion Boundary"); a new
+  "Responsibility Matrix" table covering every concern this module and its
+  consumers touch; a new "IAM Boundaries" section distinguishing the
+  ingestion runtime actor's permissions from the Terraform apply
+  identity's permissions; a new "Troubleshooting: Stale Retrieval Results"
+  workflow; an explicit three-way distinction between Knowledge Base
+  status, Data Source status, and ingestion job execution status (added to
+  "Operational Status Outputs"); and an explicit clarification that
+  `ingestion_logging.delivery_destination_arn` is the AWS Logs
+  `DeliveryDestination` ARN itself, not the physical log
+  group/bucket/Firehose-stream ARN it wraps, and that the document bucket
+  is never an implicit ingestion log destination (added to "Ingestion Log
+  Delivery"). "Known Limitations" was updated to include the ingestion
+  logging and status-output limitations introduced by PR #14/#15, which
+  had previously only been recorded in this Changelog. No Terraform
+  behavior changed - this entry is documentation only.
+
 ## [0.2.0] - 2026-08-30
 
 ### Added

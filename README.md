@@ -19,6 +19,113 @@ Knowledge Base to (either creating a new vector bucket/index, or referencing
 an existing one). There is no built-in support for OpenSearch Serverless,
 Pinecone, or any other vector store backend.
 
+## Operational Lifecycle
+
+This module provisions infrastructure. It does not orchestrate what happens
+to that infrastructure afterward. The sequence below is the complete,
+consolidated picture of how a `terraform apply` relates to the pieces this
+module can also configure (ingestion IAM policy documents, ingestion log
+delivery, status outputs) - each piece is documented in full further down;
+this section exists to make the overall shape and the control-plane/runtime
+boundary unmistakable in one place.
+
+1. `terraform apply` provisions or updates the Knowledge Base, Data Source,
+   S3 Vectors store, documents bucket, and IAM - the infrastructure this
+   module owns.
+2. Documents are uploaded or updated in the Knowledge Base's document S3
+   bucket (`content_bucket`), by whatever process manages your documents.
+   This is entirely outside this module and outside `terraform apply`.
+3. **S3 document changes do not automatically update the Knowledge Base's
+   vector index.** Amazon Bedrock does not watch the bucket.
+4. An external actor (not Terraform) invokes `bedrock:StartIngestionJob`,
+   using `knowledge_base_ids["<key>"]` and `data_source_ids["<key>"]` as the
+   required `knowledgeBaseId`/`dataSourceId` parameters. If
+   `expose_ingestion_policy = true`, `ingestion_policy_documents["<key>"]`
+   is the least-privilege policy JSON for that actor to use - see "IAM
+   Boundaries" below for who actually attaches and calls it.
+5. That same (or another) external actor can inspect ingestion execution
+   through `bedrock:GetIngestionJob` and `bedrock:ListIngestionJobs`.
+6. When `ingestion_logging` is configured for that KB, AWS emits
+   `APPLICATION_LOGS` through the chain this module builds:
+   module-created `DeliverySource` → module-created `Delivery` →
+   consumer-owned `DeliveryDestination`. See "Ingestion Log Delivery" below.
+7. `knowledge_base_statuses` and `data_source_statuses` reflect
+   provider-observed control-plane state as of the most recent Terraform
+   `refresh`/`plan`/`apply` - they are **not** ingestion-job polling,
+   continuous monitoring, or a real-time health check. See "Status
+   Semantics" below for how this differs from ingestion job status.
+8. Once ingestion succeeds, runtime consumers may retrieve against the
+   updated Knowledge Base (`Retrieve`/`RetrieveAndGenerate`) - this is
+   application-level runtime behavior, entirely outside this module.
+
+```
+                    terraform apply
+                          |
+                          v
+        +------------------------------------+
+        | Bedrock Knowledge Base              |
+        | Data Source                         |
+        | S3 Vectors                          |
+        +------------------------------------+
+                          ^
+                          |
+                  documents in S3
+                          |
+                          | external actor calls
+                          | StartIngestionJob
+                          v
+                  Bedrock ingestion
+                    /            \
+                   /              \
+      Get/ListIngestionJob     APPLICATION_LOGS
+       (external polling)             |
+                                       v
+                              DeliverySource (module)
+                                       |
+                                       v
+                                Delivery (module)
+                                       |
+                                       v
+                       DeliveryDestination (consumer-owned)
+
+                  successful ingestion
+                          |
+                          v
+              runtime retrieval / application
+```
+
+Terraform is never the caller of `StartIngestionJob`, `GetIngestionJob`, or
+`ListIngestionJobs` anywhere in this flow.
+
+## Responsibility Matrix
+
+| Concern | Module owns | Consumer owns | Notes |
+|---|---|---|---|
+| Knowledge Base | ✅ | | `awscc_bedrock_knowledge_base` |
+| Data Source | ✅ | | `awscc_bedrock_data_source` |
+| S3 Vectors index | ✅ (or bring-your-own) | ✅ (if bring-your-own) | `create_s3vectors` toggles which |
+| Document S3 bucket | ✅ | | Source documents only - never the ingestion log destination |
+| Chunking configuration | ✅ | | Validated at `plan` time; see "Chunking" |
+| Embedding/dimension validation | ✅ | | Static known-model map; see "Embedding Model / Dimension Compatibility" |
+| `StartIngestionJob` execution | | ✅ | No Terraform resource exists for this; see "Operational Lifecycle" |
+| `Get`/`ListIngestionJobs` polling | | ✅ | Runtime operational behavior |
+| Ingestion IAM policy document generation | ✅ | | `ingestion_policy_documents`, only when `expose_ingestion_policy = true` |
+| Ingestion IAM policy attachment | | ✅ | Module never attaches it to any principal |
+| Ingestion caller principal | | ✅ | CI role, app role, Lambda role, operator role - module has no opinion |
+| `APPLICATION_LOGS` `DeliverySource` | ✅ | | `aws_cloudwatch_log_delivery_source`, only when `ingestion_logging` is set |
+| `APPLICATION_LOGS` `Delivery` | ✅ | | `aws_cloudwatch_log_delivery`, only when `ingestion_logging` is set |
+| `DeliveryDestination` | | ✅ | Module only accepts an existing `delivery_destination_arn` - never creates one |
+| Physical log destination (log group / bucket / Firehose stream) | | ✅ | Must already exist; AWS never auto-provisions it |
+| CloudWatch alarms | | ✅ | Not implemented by this module at all |
+| CloudTrail account-level configuration | | ✅ | Management events are logged automatically by AWS regardless; this module configures nothing here |
+| Runtime retrieval/application (`Retrieve`/`RetrieveAndGenerate`) | | ✅ | Entirely outside this module |
+
+When `expose_ingestion_policy = true`, the module generates
+`ingestion_policy_documents` - but the consumer still owns the caller
+principal, the policy attachment, the invocation, and the polling. The
+module never crosses from "generate the JSON" into "make something use
+it."
+
 ## Features
 
 Only behavior that is actually implemented:
@@ -437,24 +544,9 @@ imperative-inside-declarative anti-pattern this boundary exists to avoid
 (see "Security Decisions" below for the concurrency/rate-limit reasons this
 is also operationally the wrong place for it).
 
-A typical external ingestion workflow, entirely outside this module and
-outside Terraform's state:
-
-```
-terraform apply                    (provisions/updates KB infrastructure)
-        |
-        v
-upload/update documents in S3       (this module's content_bucket)
-        |
-        v
-StartIngestionJob                   (external actor: CI, app, Lambda, operator)
-        |
-        v
-GetIngestionJob / ListIngestionJobs  (poll until COMPLETE or FAILED)
-        |
-        v
-application retrieval                (Retrieve / RetrieveAndGenerate)
-```
+See "Operational Lifecycle" above for the complete sequence and flow
+diagram, including how `ingestion_logging`/`APPLICATION_LOGS` and the
+status outputs fit alongside this external workflow.
 
 ### Optional IAM support for that external workflow
 
@@ -536,6 +628,31 @@ S3 bucket, no Data Firehose stream, and no destination policy. You supply
 an **existing** destination's ARN; AWS itself requires that destination to
 already exist (it is never auto-provisioned), so there is nothing for this
 module to bootstrap even if it wanted to.
+
+**`delivery_destination_arn` is the AWS Logs `DeliveryDestination` ARN -
+not the physical resource it points at.** It is **not directly**:
+- a CloudWatch Log Group ARN,
+- an S3 bucket ARN, or
+- a Data Firehose delivery stream ARN.
+
+The `DeliveryDestination` is its own logical AWS Logs object (created by
+you, outside this module, via `PutDeliveryDestination`/
+`aws_cloudwatch_log_delivery_destination`/`awscc_logs_delivery_destination`)
+that *wraps* one of those physical resources. Its ARN looks like
+`arn:aws:logs:<region>:<account>:delivery-destination:<name>` - not
+`arn:aws:logs:...:log-group:...`, `arn:aws:s3:::...`, or
+`arn:aws:firehose:...`. Passing a physical resource's own ARN here will not
+work; you must create the `DeliveryDestination` object first and pass
+*its* ARN.
+
+**The document bucket this module creates
+(`aws_s3_bucket.kb_docs`/`content_bucket`) is never the ingestion log
+destination, automatically or by any default.** It holds Knowledge Base
+source documents; `ingestion_logging.delivery_destination_arn` is an
+entirely separate, consumer-chosen destination for operational logs. This
+module does not couple them, and does not recommend doing so - the two
+have different retention/lifecycle needs and no relationship to each
+other beyond both belonging to the same KB.
 
 **Delivery source naming:** the delivery source is named deterministically
 as `"${kb_name}-ingestion-logs"` - no random suffix. `PutDeliverySource`
@@ -626,12 +743,56 @@ already required to create every other resource in this module. Do not
 attach these to `aws_iam_role.bedrock_kb`; that role is never the caller of
 any of these APIs.
 
+## IAM Boundaries
+
+Two entirely separate IAM boundaries exist in this module's contract - do
+not conflate them:
+
+**A. Ingestion runtime actor.** The principal that actually calls
+`bedrock:StartIngestionJob`/`GetIngestionJob`/`ListIngestionJobs` owns
+those runtime permissions itself. This module may *expose* a
+least-privilege policy JSON for that principal to use
+(`ingestion_policy_documents`, when `expose_ingestion_policy = true`), but
+never attaches it to anything. See "Optional IAM support for that external
+workflow" above.
+
+**B. Terraform apply identity.** Creating/configuring the two
+`ingestion_logging` resources requires the identity running `terraform
+apply` to hold control-plane permissions for log delivery configuration
+(`bedrock:AllowVendedLogDeliveryForResource`, `logs:PutDeliverySource`,
+`logs:CreateDelivery`, and related actions). See "Apply-time permissions
+for ingestion logging" above.
+
+Neither boundary's permissions belong on `aws_iam_role.bedrock_kb` - that
+role is the Bedrock service's own execution role, assumed by Bedrock
+itself during an already-running ingestion job, and is never the caller of
+any action in either boundary A or B. This module never publishes or
+recommends a broad `bedrock:*`/`logs:*` policy for either boundary; both
+sections above list exact, scoped actions.
+
 ## Operational Status Outputs
 
 `knowledge_base_statuses` and `data_source_statuses` expose each resource's
 `status`/`data_source_status` attribute, keyed by `kbs` entry. Both are
 plain computed-attribute passthroughs - no polling, no new IAM, no new AWS
 resource.
+
+**Three different status concepts exist across this module's contract -
+they are not interchangeable:**
+
+| | Concept | Source | Nature |
+|---|---|---|---|
+| A | Knowledge Base infrastructure status | `knowledge_base_statuses` | Terraform/provider-observed control-plane state |
+| B | Data Source infrastructure status | `data_source_statuses` | Terraform/provider-observed control-plane state |
+| C | Ingestion job execution status | `GetIngestionJob`/`ListIngestionJobs` | Runtime operational state, entirely outside Terraform |
+
+A and B answer "does the KB/Data Source *resource itself* exist and is it
+in a healthy state, as of the last Terraform refresh/apply?" - never "is my
+ingestion job finished?" or "did my documents get indexed?" That is
+exclusively C's question, and C is not something this module reads,
+computes, or exposes in any form - it requires calling
+`GetIngestionJob`/`ListIngestionJobs` directly (see "Operational
+Lifecycle" above).
 
 **Status outputs reflect the most recently refreshed Terraform state and
 should not be treated as continuous monitoring.** Terraform captures these
@@ -683,15 +844,51 @@ These two are architecture/policy decisions for the consumer to make and
 implement outside this module if their environment requires them, not gaps
 this module leaves unaddressed by omission.
 
+## Troubleshooting: Stale Retrieval Results
+
+If a `Retrieve`/`RetrieveAndGenerate` call isn't reflecting a document you
+just added or changed, work through this sequence - **`terraform apply`
+does not trigger document re-ingestion**, so it is never the fix by itself:
+
+1. Confirm the document was actually uploaded or updated in the content
+   bucket (`content_bucket`).
+2. Confirm `StartIngestionJob` was actually invoked afterward, by the
+   external actor responsible for it - a document sitting in S3 with no
+   ingestion job run against it will never appear in retrieval results.
+3. Inspect `GetIngestionJob`/`ListIngestionJobs` for that data source to
+   confirm the job reached `COMPLETE` (not `FAILED`, `STOPPED`, or still
+   `IN_PROGRESS`).
+4. If `ingestion_logging` is configured, inspect the delivered
+   `APPLICATION_LOGS` for that document - per-document status events
+   (`EMBEDDING_FAILED`, `INDEXING_FAILED`, etc.) will usually explain a
+   silent failure that `GetIngestionJob`'s summary alone might not make
+   obvious.
+5. Only when investigating infrastructure/control-plane state (is the KB
+   or Data Source itself healthy, not "did my documents get indexed"),
+   inspect `knowledge_base_statuses`/`data_source_statuses` - and re-run
+   `terraform plan`/`refresh` first, since these are refresh-time
+   snapshots, not live values.
+6. Once ingestion is confirmed successful (step 3), investigate runtime
+   retrieval behavior itself (query text, retrieval configuration,
+   application-level caching) - that is outside this module's scope
+   entirely.
+
 ## Known Limitations
 
 - Terraform never calls `StartIngestionJob`, `GetIngestionJob`, or
-  `ListIngestionJobs` - see "Bedrock / Ingestion Boundary".
+  `ListIngestionJobs`, and no Terraform resource represents an ingestion
+  job at all (none exists in `hashicorp/aws`, `hashicorp/awscc`, or raw
+  CloudFormation) - see "Operational Lifecycle" and "Bedrock / Ingestion
+  Boundary".
 - No automatic S3 → Knowledge Base synchronization: adding, changing, or
   removing documents in the content bucket never triggers ingestion on its
   own.
 - No automatic re-ingestion after a `chunking` change, even though that
   change replaces the underlying data source - see "Chunking".
+- `knowledge_base_statuses`/`data_source_statuses` are refresh-time
+  snapshots of Terraform/provider-observed control-plane state, not
+  continuous monitoring or ingestion-job status - see "Operational Status
+  Outputs".
 - The embedding model / vector dimension compatibility map
   (`known_embedding_model_dimensions`) is a static, maintained snapshot by
   design, not a live query against AWS - see "Embedding Model / Dimension
@@ -703,6 +900,13 @@ this module leaves unaddressed by omission.
   ARN, not a specific data source, because AWS's IAM Service Authorization
   Reference does not expose a narrower resource type for
   `StartIngestionJob`/`GetIngestionJob`/`ListIngestionJobs`.
+- No CloudWatch alarms of any kind are created or configured by this
+  module.
+- No module-created ingestion log `DeliveryDestination` - `ingestion_logging`
+  requires an existing one; see "Ingestion Log Delivery".
+- Ingestion log delivery is same-account only; cross-account
+  `DeliveryDestination` policies (`PutDeliveryDestinationPolicy`) are not
+  implemented - see "Ingestion Log Delivery".
 - No Guardrails, model evaluation, or advanced observability wiring beyond
   what's already listed under "Features".
 - No cross-region replication or S3 event notifications for the documents
