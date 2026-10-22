@@ -29,8 +29,8 @@ variable "enable_kbs" {
 # the KB dimensions table but has no corresponding entry in Bedrock's model
 # catalog or model-ID table under any Cohere model card - its exact
 # Knowledge-Bases model ID cannot be confirmed). Both are left out rather
-# than guessed at; see the README's "Embedding Model / Dimension
-# Compatibility" section.
+# than guessed at; see docs/chunking-and-embeddings.md "Embedding Model / Dimension
+# Compatibility".
 locals {
   known_embedding_model_dimensions = {
     "amazon.titan-embed-text-v1"               = [1536]
@@ -66,8 +66,8 @@ variable "kbs" {
     # ingestion jobs for this KB: bedrock:StartIngestionJob,
     # GetIngestionJob, ListIngestionJobs, scoped to this KB's own ARN. This
     # module never calls StartIngestionJob itself and never attaches this
-    # document to any principal - see "Bedrock / Ingestion Boundary" in the
-    # README for why, and for who should use the resulting document.
+    # document to any principal - see "Bedrock / Ingestion Boundary" in
+    # docs/ingestion.md for why, and for who should use the resulting document.
     expose_ingestion_policy = optional(bool, false)
 
     # When set, this module creates an AWS Logs vended-log delivery pipe
@@ -77,8 +77,8 @@ variable "kbs" {
     # module never creates the destination (CloudWatch Logs, S3, or Data
     # Firehose) or an aws_cloudwatch_log_delivery_destination resource -
     # only the source and the source-to-destination link. Default null
-    # (omitted) creates neither resource. See the README's "Ingestion Log
-    # Delivery" section.
+    # (omitted) creates neither resource. See docs/ingestion.md "Ingestion Log
+    # Delivery".
     ingestion_logging = optional(object({
       delivery_destination_arn = string
     }))
@@ -131,8 +131,8 @@ variable "kbs" {
     # create_s3vectors = true - this module does not know the encryption
     # state of an externally-provided s3vectors_index_arn, and cannot
     # configure encryption on a resource it does not create. Applied
-    # identically to both the vector bucket and its index (see README's
-    # "S3 Vectors Encryption" section for why this module sets it on both
+    # identically to both the vector bucket and its index (see
+    # docs/encryption.md "S3 Vectors Encryption" for why this module sets it on both
     # explicitly rather than relying on the vector index's own encryption
     # inheritance from its bucket). This is a SEPARATE security boundary
     # from the docs bucket's kms_key_arn below - the two may use different

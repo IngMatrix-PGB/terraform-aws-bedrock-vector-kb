@@ -28,7 +28,7 @@ resource "aws_s3vectors_vector_bucket" "this" {
   # defaulting to AES256 when omitted, with no stated inheritance from the
   # bucket - a signal that doesn't fully agree with the AWS Console
   # encryption walkthrough page's "use bucket settings for encryption"
-  # option for the index. See the README's "S3 Vectors Encryption" section.
+  # option for the index. See docs/encryption.md "S3 Vectors Encryption".
   dynamic "encryption_configuration" {
     for_each = try(each.value.s3vectors_kms_key_arn, null) != null ? [1] : []
     content {
@@ -94,7 +94,7 @@ locals {
   # bucket/index for (create_s3vectors = true) - an externally-provided
   # s3vectors_index_arn's encryption state is outside this module's
   # knowledge or control, so s3vectors_kms_key_arn has no effect there. See
-  # the README's "S3 Vectors Encryption" section.
+  # docs/encryption.md "S3 Vectors Encryption".
   kbs_with_s3vectors_kms = {
     for k, v in local.create_vectors : k => v
     if try(v.s3vectors_kms_key_arn, null) != null
@@ -439,7 +439,7 @@ resource "aws_iam_role_policy_attachment" "s3_kms" {
 # creation, not as evidence of a runtime KMS permission requirement. This
 # module does not add kms:GenerateDataKey (or kms:Encrypt/CreateGrant/
 # DescribeKey) without AWS documentation naming it as necessary - see the
-# README's "S3 Vectors Encryption" section for the residual ambiguity this
+# docs/encryption.md "S3 Vectors Encryption" for the residual ambiguity this
 # leaves around the write path specifically.
 resource "aws_iam_policy" "s3vectors_kms" {
   for_each = local.kbs_with_s3vectors_kms
@@ -479,7 +479,7 @@ locals {
   # NOTE ON REPLACEMENT: per the AWS::Bedrock::DataSource CloudFormation
   # resource schema, ChunkingConfiguration is a createOnlyProperty - changing
   # it (including turning it on/off) forces awscc to replace the data source,
-  # not update it in place. See README "Chunking" section.
+  # not update it in place. See docs/chunking-and-embeddings.md "Chunking".
   chunking_vector_ingestion_configuration_by_kb = {
     for k, v in local.enabled_kbs : k => (
       try(v.chunking, null) == null ? null : {
@@ -544,8 +544,8 @@ resource "awscc_bedrock_knowledge_base" "this" {
 }
 
 # Optional, per-KB IAM policy DOCUMENT (JSON) for an external actor to manage
-# ingestion jobs - never created or attached by this module. See the README's
-# "Bedrock / Ingestion Boundary" section for the full rationale.
+# ingestion jobs - never created or attached by this module. See
+# docs/ingestion.md "Bedrock / Ingestion Boundary" for the full rationale.
 #
 # Deliberately NOT granted to the Bedrock execution role above
 # (aws_iam_role.bedrock_kb): that role is assumed BY the Bedrock service
@@ -567,7 +567,7 @@ resource "awscc_bedrock_knowledge_base" "this" {
 # a KB with more than one data source authorizes ingestion for any of that
 # KB's data sources, not just one. This module currently creates exactly one
 # data source per KB, but the IAM scoping limitation is AWS's, not this
-# module's, and is documented as such in the README.
+# module's, and is documented as such in docs/ingestion.md.
 locals {
   ingestion_policy_documents = {
     for k, v in local.kbs_with_ingestion_policy : k => jsonencode({
@@ -592,8 +592,8 @@ locals {
 # DESTINATION (CloudWatch Logs, S3, or Data Firehose), a log group/bucket/
 # stream, or a cross-account destination policy. The caller supplies an
 # EXISTING delivery destination ARN; that destination must already exist,
-# same as AWS's own API requires. See the README's "Ingestion Log Delivery"
-# section for the full rationale (multiple KBs may intentionally point at
+# same as AWS's own API requires. See docs/ingestion.md "Ingestion Log
+# Delivery" for the full rationale (multiple KBs may intentionally point at
 # the same destination ARN - AWS explicitly supports many delivery sources
 # sending to one destination, so this module does not attempt to deduplicate
 # or share a destination resource it never creates in the first place).

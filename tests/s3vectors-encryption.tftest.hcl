@@ -29,7 +29,7 @@
 #     additional action, so none is granted speculatively - but AWS does
 #     not explicitly state that kms:Decrypt alone is sufficient for
 #     writes either. This is a residual, flagged ambiguity, not a
-#     resolved one - see the README's "S3 Vectors Encryption" section.
+#     resolved one - see docs/encryption.md "S3 Vectors Encryption".
 #     Live AWS integration validation remains future work.
 #   - that a real apply against an existing, unencrypted vector
 #     bucket/index actually replaces it as AWS documents (encryption
@@ -39,7 +39,7 @@
 #     replacement also cascades to the Knowledge Base/Data Source (the
 #     Knowledge Base's storage_configuration is a CloudFormation
 #     create-only property) is likewise unverified against a live plan -
-#     see the README's "S3 Vectors Encryption" section.
+#     see docs/encryption.md "S3 Vectors Encryption".
 
 mock_provider "aws" {
   override_during = plan

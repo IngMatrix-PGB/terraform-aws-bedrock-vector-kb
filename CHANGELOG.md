@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- README cut from ~1,140 to ~240 lines: what the module does, a comparison
+  with `aws-ia/terraform-aws-bedrock`, security, usage, and the inputs that
+  replace resources. The detailed reference moved unchanged to `docs/`
+  (operations, ingestion, encryption, chunking and embeddings, replacement,
+  guardrails), with section references turned into links.
+- Code comments and output descriptions point to the matching `docs/` file
+  instead of README sections.
+
 ## [1.1.0] - 2026-10-22
 
 Security hardening for the Bedrock execution role and the documents
