@@ -166,6 +166,13 @@ variable "kbs" {
     # never touches the current/live version) and is therefore
     # consumer-opt-in only, never a default.
     noncurrent_version_expiration_days = optional(number)
+
+    # Lets `terraform destroy` delete the documents bucket (every object
+    # version included) and the module-created S3 Vectors bucket even when
+    # they still hold data. false (default) keeps AWS's protection: destroy
+    # fails on a non-empty bucket. Meant for demos and ephemeral
+    # environments - never set it where the documents or vectors matter.
+    force_destroy = optional(bool, false)
   }))
 
   # This module unconditionally derives the Bedrock Data Source's name as
