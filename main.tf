@@ -140,6 +140,17 @@ resource "aws_s3_bucket_public_access_block" "kb_docs" {
   restrict_public_buckets = true
 }
 
+# ACLs disabled: every object is owned by the bucket owner, so access is
+# governed only by IAM and the bucket policy below.
+resource "aws_s3_bucket_ownership_controls" "kb_docs" {
+  for_each = local.enabled_kbs
+  bucket   = aws_s3_bucket.kb_docs[each.key].id
+
+  rule {
+    object_ownership = "BucketOwnerEnforced"
+  }
+}
+
 resource "aws_s3_bucket_versioning" "kb_docs" {
   for_each = local.enabled_kbs
   bucket   = aws_s3_bucket.kb_docs[each.key].id
@@ -247,6 +258,15 @@ resource "aws_s3_bucket_logging" "kb_docs" {
 # -----------------------------
 # IAM Role + Policies for Bedrock KB
 # -----------------------------
+data "aws_partition" "current" {}
+data "aws_region" "current" {}
+data "aws_caller_identity" "current" {}
+
+# Confused-deputy protection, per AWS's own trust policy for the Knowledge
+# Bases service role: Bedrock may only assume this role on behalf of a
+# Knowledge Base in this same account and region. The ARN is wildcarded on
+# the KB ID because the role must exist (and be assumable) before the KB it
+# serves is created.
 data "aws_iam_policy_document" "bedrock_kb_assume" {
   statement {
     effect  = "Allow"
@@ -254,6 +274,18 @@ data "aws_iam_policy_document" "bedrock_kb_assume" {
     principals {
       type        = "Service"
       identifiers = ["bedrock.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [data.aws_caller_identity.current.account_id]
+    }
+
+    condition {
+      test     = "ArnLike"
+      variable = "aws:SourceArn"
+      values   = ["arn:${data.aws_partition.current.partition}:bedrock:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:knowledge-base/*"]
     }
   }
 }
@@ -303,7 +335,10 @@ resource "aws_iam_policy" "kb_s3_read" {
         Sid      = "S3ListBucket"
         Effect   = "Allow"
         Action   = ["s3:ListBucket"]
-        Resource = ["arn:aws:s3:::${each.value.content_bucket}"]
+        Resource = ["arn:${data.aws_partition.current.partition}:s3:::${each.value.content_bucket}"]
+        Condition = {
+          StringEquals = { "aws:ResourceAccount" = data.aws_caller_identity.current.account_id }
+        }
       },
       {
         Sid    = "S3GetObject"
@@ -311,9 +346,15 @@ resource "aws_iam_policy" "kb_s3_read" {
         Action = ["s3:GetObject"]
         Resource = [
           trimspace(try(each.value.content_prefix, "")) != "" ?
-          "arn:aws:s3:::${each.value.content_bucket}/${trim(each.value.content_prefix, "/")}/*" :
-          "arn:aws:s3:::${each.value.content_bucket}/*"
+          "arn:${data.aws_partition.current.partition}:s3:::${each.value.content_bucket}/${trim(each.value.content_prefix, "/")}/*" :
+          "arn:${data.aws_partition.current.partition}:s3:::${each.value.content_bucket}/*"
         ]
+        # S3 bucket names are global: without this, a bucket with the same
+        # name in another account (e.g. after this one is deleted and the
+        # name re-registered) would still match this policy.
+        Condition = {
+          StringEquals = { "aws:ResourceAccount" = data.aws_caller_identity.current.account_id }
+        }
       }
     ]
   })

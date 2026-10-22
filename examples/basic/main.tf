@@ -23,12 +23,10 @@ provider "awscc" {
 
 module "bedrock_kb" {
   # Relative path: this example is exercised directly by local development
-  # and CI (terraform validate/test against this exact repo checkout), and
-  # there is no tagged release yet for an external Registry-style source to
-  # point at. Once the first vX.Y.Z tag exists, switch this to the address
-  # an external caller would actually use, e.g.:
-  #   source  = "github.com/IngMatrix-PGB/terraform-aws-bedrock-vector-kb"
-  #   version = "~> 1.0" # once published to the public Registry
+  # and CI (terraform validate against this exact repo checkout). From your
+  # own configuration, pin a release tag (see the repository's Releases)
+  # instead:
+  #   source = "git::https://github.com/IngMatrix-PGB/terraform-aws-bedrock-vector-kb.git?ref=v1.0.0"
   source = "../.."
 
   enable_kbs = true

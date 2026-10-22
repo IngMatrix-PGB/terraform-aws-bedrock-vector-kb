@@ -28,6 +28,11 @@ output "s3vectors_index_arns" {
   value       = local.index_arn_by_kb
 }
 
+output "content_bucket_arns" {
+  description = "Documents (content) S3 bucket ARNs by key - e.g. to grant the process that uploads documents s3:PutObject on it."
+  value       = { for k, v in aws_s3_bucket.kb_docs : k => v.arn }
+}
+
 output "iam_role_arns" {
   description = "IAM Role ARNs used by each KB."
   value       = { for k, v in aws_iam_role.bedrock_kb : k => v.arn }

@@ -161,7 +161,7 @@ Only behavior that is actually implemented:
 - A native `terraform test` suite (mock-provider based; no AWS credentials
   required to run it)
 
-## Requirements
+## Requirements and Testing
 
 This module's own runtime requirement is whatever `versions.tf` declares
 (see the generated table below).
@@ -208,6 +208,7 @@ consumers who never run these tests. See [CONTRIBUTING.md](CONTRIBUTING.md).
 | [aws_s3_bucket.kb_docs](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket) | resource |
 | [aws_s3_bucket_lifecycle_configuration.kb_docs](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_lifecycle_configuration) | resource |
 | [aws_s3_bucket_logging.kb_docs](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_logging) | resource |
+| [aws_s3_bucket_ownership_controls.kb_docs](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_ownership_controls) | resource |
 | [aws_s3_bucket_policy.kb_docs_tls_only](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_policy) | resource |
 | [aws_s3_bucket_public_access_block.kb_docs](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_public_access_block) | resource |
 | [aws_s3_bucket_server_side_encryption_configuration.kb_docs](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_server_side_encryption_configuration) | resource |
@@ -229,6 +230,7 @@ consumers who never run these tests. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 | Name | Description |
 | ---- | ----------- |
+| <a name="output_content_bucket_arns"></a> [content\_bucket\_arns](#output\_content\_bucket\_arns) | Documents (content) S3 bucket ARNs by key - e.g. to grant the process that uploads documents s3:PutObject on it. |
 | <a name="output_data_source_ids"></a> [data\_source\_ids](#output\_data\_source\_ids) | Bedrock data source IDs by kbs key. Combined with knowledge\_base\_ids, this gives an external actor everything StartIngestionJob's required knowledgeBaseId/dataSourceId path parameters need - this module does not call StartIngestionJob itself (see the README's "Bedrock / Ingestion Boundary" section); it only exposes the identifiers that workflow requires. |
 | <a name="output_data_source_statuses"></a> [data\_source\_statuses](#output\_data\_source\_statuses) | Bedrock data source status by key (AVAILABLE, DELETING, DELETE\_UNSUCCESSFUL, CREATING, UPDATING, or FAILED). Reflects the most recently refreshed Terraform state, the same point-in-time caveat as knowledge\_base\_statuses applies - not continuous monitoring, polling, or a real-time health check. |
 | <a name="output_iam_role_arns"></a> [iam\_role\_arns](#output\_iam\_role\_arns) | IAM Role ARNs used by each KB. |
@@ -1034,10 +1036,21 @@ workflow already required.
 
 **Implemented:**
 - S3 Block Public Access
+- ACLs disabled (`BucketOwnerEnforced` object ownership)
 - TLS-only bucket access
 - Bucket versioning
 - Encryption at rest (SSE-S3 by default, optional SSE-KMS)
 - Optional S3 access logging
+- Confused-deputy protection on the Bedrock execution role's trust policy:
+  `bedrock.amazonaws.com` may only assume it with `aws:SourceAccount` equal
+  to this account and `aws:SourceArn` matching a Knowledge Base in this
+  account and region (`arn:<partition>:bedrock:<region>:<account>:knowledge-base/*`),
+  as in AWS's own service role example for Knowledge Bases
+- S3 read permissions pinned to this account with `aws:ResourceAccount`, so
+  a bucket with the same (globally unique) name in another account never
+  matches the policy
+- Partition-aware IAM ARNs (`aws`, `aws-us-gov`, `aws-cn`), resolved from
+  `data.aws_partition` instead of a hardcoded `arn:aws`
 
 **Not automatically implemented:**
 - Cross-region replication - this module has no disaster-recovery or
