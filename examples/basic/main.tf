@@ -26,7 +26,7 @@ module "bedrock_kb" {
   # and CI (terraform validate against this exact repo checkout). From your
   # own configuration, pin a release tag (see the repository's Releases)
   # instead:
-  #   source = "git::https://github.com/IngMatrix-PGB/terraform-aws-bedrock-vector-kb.git?ref=v1.0.0"
+  #   source = "git::https://github.com/IngMatrix-PGB/terraform-aws-bedrock-vector-kb.git?ref=v1.1.0"
   source = "../.."
 
   enable_kbs = true

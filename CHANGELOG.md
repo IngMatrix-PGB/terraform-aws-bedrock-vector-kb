@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-22
+
+Security hardening for the Bedrock execution role and the documents
+bucket. Backward compatible: no new required inputs, no changed resource
+addresses. Existing deployments get an in-place update of the trust policy
+and S3 read policy, plus one new `aws_s3_bucket_ownership_controls`
+resource per KB.
+
 ### Added
 
 - `content_bucket_arns` output: the documents bucket ARN per `kbs` key, so
