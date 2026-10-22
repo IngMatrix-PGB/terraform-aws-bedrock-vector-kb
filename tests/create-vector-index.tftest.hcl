@@ -44,6 +44,14 @@ mock_provider "aws" {
       arn = "arn:aws:s3:::mock-bucket"
     }
   }
+
+  # The S3 read policy builds its ARNs from data.aws_partition; without a
+  # concrete value the mock would put a random string where "aws" goes.
+  mock_data "aws_partition" {
+    defaults = {
+      partition = "aws"
+    }
+  }
 }
 
 mock_provider "awscc" {

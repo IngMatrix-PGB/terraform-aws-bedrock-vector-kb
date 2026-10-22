@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `content_bucket_arns` output: the documents bucket ARN per `kbs` key, so
+  callers can grant their upload process `s3:PutObject` without rebuilding
+  the ARN themselves.
+- `aws_s3_bucket_ownership_controls.kb_docs` with `BucketOwnerEnforced`:
+  ACLs are disabled on the documents bucket, so access is governed only by
+  IAM and the bucket policy.
+
+### Security
+
+- The Bedrock execution role's trust policy now carries confused-deputy
+  conditions (`aws:SourceAccount` and `aws:SourceArn` scoped to Knowledge
+  Bases in this account and region), matching AWS's service role example
+  for Knowledge Bases. Existing roles are updated in place (no
+  replacement). A Knowledge Base in another account or region can no
+  longer get Bedrock to assume this role.
+- The S3 read policy is pinned to this account with `aws:ResourceAccount`.
+  S3 bucket names are global; without it, a same-named bucket in another
+  account would also match the policy.
+
+### Fixed
+
+- IAM ARNs for the documents bucket were hardcoded to the `aws` partition,
+  so the module produced wrong ARNs in GovCloud (`aws-us-gov`) and China
+  (`aws-cn`). They are now built from `data.aws_partition`.
+- `examples/basic` still said no release tag existed; it now shows how to
+  pin a tag.
+
 ## [1.0.0] - 2026-08-31
 
 This release declares the public module API - the `kbs[*]` input schema,
