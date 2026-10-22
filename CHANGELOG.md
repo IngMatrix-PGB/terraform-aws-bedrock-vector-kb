@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `examples/rag-e2e`: an end-to-end RAG service built on the module -
+  sample documents uploaded with `aws_s3_object`, `scripts/ingest.sh`
+  (start ingestion and wait for it), and a Python 3.13 Lambda behind an
+  `AWS_IAM` function URL that calls `RetrieveAndGenerate` and returns the
+  answer with deduplicated citations. Least-privilege IAM (Retrieve on one
+  Knowledge Base, InvokeModel on one inference profile and its models
+  through that profile), optional Guardrail, X-Ray, JSON logs without the
+  question text, reserved concurrency, and `scripts/ask.py` for
+  SigV4-signed calls.
+- `kbs[*].force_destroy` (default `false`): lets `terraform destroy`
+  remove the documents bucket and the module-created S3 Vectors bucket
+  while they still hold data. Meant for demos and ephemeral environments.
+- CI: `terraform validate` for `examples/rag-e2e` and a job running the
+  example's Lambda unit tests.
+- `.gitignore` for Terraform working files.
+
 ### Changed
 
 - README cut from ~1,140 to ~240 lines: what the module does, a comparison

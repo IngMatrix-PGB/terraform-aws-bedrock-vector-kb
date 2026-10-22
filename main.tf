@@ -20,6 +20,7 @@ resource "aws_s3vectors_vector_bucket" "this" {
   for_each = local.create_vectors
 
   vector_bucket_name = each.value.s3vectors_bucket_name
+  force_destroy      = try(each.value.force_destroy, false)
 
   # Set explicitly on both the bucket and the index below (rather than
   # relying on the index's own "use bucket settings" inheritance option)
@@ -122,6 +123,8 @@ locals {
 resource "aws_s3_bucket" "kb_docs" {
   for_each = local.enabled_kbs
   bucket   = each.value.content_bucket
+
+  force_destroy = try(each.value.force_destroy, false)
 
   tags = merge(var.tags, {
     Name    = each.value.content_bucket

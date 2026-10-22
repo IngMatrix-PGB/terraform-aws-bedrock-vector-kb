@@ -40,6 +40,7 @@ jobs:
         root:
           - .
           - examples/basic
+          - examples/rag-e2e
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: hashicorp/setup-terraform@v4.0.1
@@ -68,6 +69,20 @@ jobs:
         run: terraform init -backend=false -input=false
       - name: terraform test (mock_provider only - no AWS credentials, no real resources)
         run: terraform test
+
+  lambda-tests:
+    name: rag-e2e lambda unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.13" # matches the Lambda runtime in examples/rag-e2e
+      # Standard library only: the tests replace the Bedrock client with a
+      # fake, so boto3 is not installed.
+      - name: python -m unittest
+        working-directory: examples/rag-e2e/lambda
+        run: python -m unittest discover -s tests -v
 
   tflint:
     name: tflint
